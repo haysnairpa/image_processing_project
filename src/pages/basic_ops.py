@@ -14,6 +14,13 @@ from flet import (
     Checkbox,
     dropdown,
     ScrollMode,
+    Container,
+    IconButton,
+    Icons,
+    Stack,
+    FloatingActionButtonLocation,
+    animation,
+    transform,
 )
 from PIL import Image as PILImage, ImageOps, ImageEnhance, ImageDraw
 import io
@@ -39,13 +46,22 @@ def basic_operations_page(page: Page):
             show_image(processed_image, "Image Reset")
 
     def show_image(img, title):
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        buf.seek(0)
-        img_base64 = base64.b64encode(buf.getvalue()).decode()
-        image_display.src_base64 = img_base64
-        image_title.value = title
-        page.update()
+        try:
+            # Convert RGBA to RGB if needed
+            if img.mode == 'RGBA':
+                img = img.convert('RGB')
+            
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            buf.seek(0)
+            img_base64 = base64.b64encode(buf.getvalue()).decode()
+            image_display.src_base64 = img_base64
+            image_title.value = title
+            page.update()
+        except Exception as e:
+            print(f"Error showing image: {e}")
+            image_title.value = f"Error: {str(e)}"
+            page.update()
 
     # Functionality: Grayscale
     def apply_grayscale(e):
@@ -186,139 +202,196 @@ def basic_operations_page(page: Page):
     file_picker = FilePicker(on_result=upload_image)
     page.overlay.append(file_picker)
 
-    image_display = Image(width=300, height=300)
-    image_title = Text("No image uploaded")
-
-    red_slider = Slider(min=0, max=255, divisions=255, value=0, label="Red {value}")
-    green_slider = Slider(min=0, max=255, divisions=255, value=0, label="Green {value}")
-    blue_slider = Slider(min=0, max=255, divisions=255, value=0, label="Blue {value}")
-
-    crop_coordinates = TextField(label="Crop Coordinates (x1,y1,x2,y2)", value="0,0,100,100")
-
-    scale_slider = Slider(min=0.1, max=3.0, divisions=29, value=1.0, label="Scale {value}")
-
-    blend_slider = Slider(min=0.0, max=1.0, divisions=10, value=0.5, label="Blend Alpha {value}")
-
-    translation_x = TextField(label="Translation X", value="0", width=100)
-    translation_y = TextField(label="Translation Y", value="0", width=100)
-    rotation_angle = TextField(label="Rotation Angle (°)", value="0", width=100)
-    brightness_slider = Slider(min=0.1, max=2.0, value=1.0, label="Brightness {value}")
-    contrast_slider = Slider(min=0.1, max=2.0, value=1.0, label="Contrast {value}")
-
-    filter_dropdown = Dropdown(
-        label="Select Filter",
-        options=[dropdown.Option("Sepia"), dropdown.Option("Cyanotype")],
-        value="Sepia"
-    )
-
-    border_thickness = TextField(label="Border Thickness", value="5", width=100)
-    border_color = TextField(label="BorderColor (Hex)", value="#000000", width=150)
-    overlay_transparency = Slider(min=0.0, max=1.0, value=0.5, label="Overlay Transparency {value}")
-
+    # Define all UI components first
+    red_slider = Slider(min=0, max=255, value=0, label="Red")
+    green_slider = Slider(min=0, max=255, value=0, label="Green")
+    blue_slider = Slider(min=0, max=255, value=0, label="Blue")
+    
+    scale_slider = Slider(min=0.1, max=2.0, value=1.0, label="Scale")
+    translation_x = TextField(value="0", label="X", width=100)
+    translation_y = TextField(value="0", label="Y", width=100)
+    rotation_angle = TextField(value="0", label="Angle", width=100)
+    
+    brightness_slider = Slider(min=0.1, max=2.0, value=1.0, label="Brightness")
+    contrast_slider = Slider(min=0.1, max=2.0, value=1.0, label="Contrast")
+    
     flip_dropdown = Dropdown(
-        label="Select Flip Type",
+        width=150,
         options=[
             dropdown.Option("Horizontal"),
             dropdown.Option("Vertical"),
             dropdown.Option("Diagonal"),
         ],
-        value="Horizontal",  # Default value
+        value="Horizontal"
+    )
+    
+    filter_dropdown = Dropdown(
+        width=150,
+        options=[
+            dropdown.Option("Sepia"),
+            dropdown.Option("Cyanotype"),
+        ],
+        value="Sepia"
+    )
+    
+    border_thickness = TextField(value="5", label="Thickness", width=100)
+    border_color = TextField(value="#000000", label="Color", width=100)
+
+    image_display = Image(width=400, height=600, fit="contain")
+    image_title = Text("No image uploaded", size=16, weight="bold")
+
+    # Then define control groups
+    basic_controls = Row(
+        [
+            ElevatedButton("Upload Image", on_click=lambda _: file_picker.pick_files(allow_multiple=False)),
+            ElevatedButton("Reset Image", on_click=reset_image),
+        ],
+        alignment="center"
+    )
+
+    color_controls = Column(
+        [
+            Text("Color Adjustments", size=14, weight="bold"),
+            Row(
+                [
+                    Column([
+                        red_slider,
+                        green_slider,
+                        blue_slider,
+                    ], expand=True),
+                    ElevatedButton("Apply", on_click=apply_color_manipulation),
+                ]
+            ),
+        ]
+    )
+
+    transform_controls = Column(
+        [
+            Text("Image Transformations", size=14, weight="bold"),
+            Row(
+                [
+                    ElevatedButton("Grayscale", on_click=apply_grayscale),
+                    ElevatedButton("Negative", on_click=apply_negative),
+                    flip_dropdown,
+                    ElevatedButton("Flip", on_click=apply_flip),
+                ],
+                wrap=True
+            ),
+        ]
+    )
+
+    geometry_controls = Column(
+        [
+            Text("Geometry", size=14, weight="bold"),
+            Row(
+                [
+                    Column([
+                        scale_slider,
+                        Row([translation_x, translation_y]),
+                        rotation_angle,
+                    ], expand=True),
+                    Column([
+                        ElevatedButton("Scale", on_click=apply_scaling),
+                        ElevatedButton("Move", on_click=apply_translation),
+                        ElevatedButton("Rotate", on_click=apply_rotation),
+                    ])
+                ]
+            ),
+        ]
+    )
+
+    enhancement_controls = Column(
+        [
+            Text("Enhancements", size=14, weight="bold"),
+            Row(
+                [
+                    Column([
+                        brightness_slider,
+                        contrast_slider,
+                    ], expand=True),
+                    Column([
+                        ElevatedButton("Brightness", on_click=apply_brightness),
+                        ElevatedButton("Contrast", on_click=apply_contrast),
+                    ])
+                ]
+            ),
+        ]
+    )
+
+    effects_controls = Column(
+        [
+            Text("Effects", size=14, weight="bold"),
+            Row(
+                [
+                    filter_dropdown,
+                    ElevatedButton("Apply Filter", on_click=apply_color_filter),
+                    border_thickness,
+                    border_color,
+                    ElevatedButton("Add Border", on_click=apply_border),
+                ],
+                wrap=True
+            ),
+        ]
+    )
+
+    # Wrap all controls in a scrollable container
+    controls_container = Container(
+        content=Column(
+            [
+                basic_controls,
+                transform_controls,
+                geometry_controls, 
+                color_controls,
+                enhancement_controls,
+                effects_controls,
+            ],
+            spacing=20,
+            scroll=ScrollMode.AUTO,
+            height=800,  # Match image height
+        ),
+        width=400,   # Fixed width for controls
+        bgcolor="#000000",  # Light background for controls area
+        padding=20,
+    )
+
+    # Back button with nice design
+    back_button = Container(
+        content=IconButton(
+            icon=Icons.ARROW_BACK,
+            icon_color="white",
+            on_click=lambda _: page.go("/"),
+            tooltip="Back to Home",
+        ),
+        bgcolor="#2196F3",
+        border_radius=30,
+        padding=5,
+        margin=10,
+        offset=transform.Offset(-0.45, 0),
+        animate_offset=animation.Animation(300, "easeOut"),
     )
 
     return View(
         controls=[
-            Column(
-                [
-                    ElevatedButton("Upload Image", on_click=lambda _: file_picker.pick_files(allow_multiple=False)),
-                    ElevatedButton("Reset Image", on_click=reset_image),
-                    Row(
+            Stack([  # Use Stack to overlay back button
+                Container(  # Main content container
+                    content=Row(
                         [
-                            ElevatedButton("Grayscale", on_click=apply_grayscale),
-                            ElevatedButton("Negative", on_click=apply_negative),
-                        ]
+                            # Left side - Image
+                            Container(
+                                content=Column(
+                                    [image_title, image_display],
+                                    horizontal_alignment="center",
+                                ),
+                                expand=True,
+                            ),
+                            # Right side - Controls
+                            controls_container,
+                        ],
+                        spacing=20,
+                        height=page.window.height,  # Updated to new property
                     ),
-                    Row(
-                        [
-                            red_slider,
-                            green_slider,
-                            blue_slider,
-                            ElevatedButton("Apply Color Manipulation", on_click=apply_color_manipulation),
-                        ]
-                    ),
-                    Row(
-                        [
-                            crop_coordinates,
-                            ElevatedButton("Apply Crop", on_click=apply_crop),
-                        ]
-                    ),
-                    Row(
-                        [
-                            scale_slider,
-                            ElevatedButton("Apply Scaling", on_click=apply_scaling),
-                        ]
-                    ),
-                    Row(
-                        [
-                            blend_slider,
-                            ElevatedButton("Apply Blending", on_click=apply_blending),
-                        ]
-                    ),
-                    Row(
-                        [
-                            flip_dropdown,
-                            ElevatedButton("Apply Flip", on_click=apply_flip),
-                        ]
-                    ),
-                    Row(
-                        [
-                            translation_x,
-                            translation_y,
-                            ElevatedButton("Apply Translation", on_click=apply_translation),
-                        ]
-                    ),
-                    Row(
-                        [
-                            rotation_angle,
-                            ElevatedButton("Apply Rotation", on_click=apply_rotation),
-                        ]
-                    ),
-                    Row(
-                        [
-                            brightness_slider,
-                            ElevatedButton("Apply Brightness", on_click=apply_brightness),
-                        ]
-                    ),
-                    Row(
-                        [
-                            contrast_slider,
-                            ElevatedButton("Apply Contrast", on_click=apply_contrast),
-                        ]
-                    ),
-                    Row(
-                        [
-                            filter_dropdown,
-                            ElevatedButton("Apply Filter", on_click=apply_color_filter),
-                        ]
-                    ),
-                    Row(
-                        [
-                            border_thickness,
-                            border_color,
-                            ElevatedButton("Apply Border", on_click=apply_border),
-                        ]
-                    ),
-                    Row(
-                        [
-                            overlay_transparency,
-                            ElevatedButton("Apply Overlay", on_click=apply_overlay),
-                        ]
-                    ),
-                    image_display,
-                    image_title,
-                ],
-                spacing=20,
-                scroll=ScrollMode.AUTO,
-                expand=True,
-            )
-        ]
+                ),
+                back_button,  # Floating back button
+            ]),
+        ],
     )
