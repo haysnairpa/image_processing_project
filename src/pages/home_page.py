@@ -138,7 +138,7 @@ class HomePage(UserControl):
                         content=Column(
                             controls=[
                                 Text(
-                                    "Sona Picture Processing",
+                                    "SONA Picture Processing",
                                     size=64,
                                     weight="bold",
                                     color=colors.WHITE,

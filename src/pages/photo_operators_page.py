@@ -252,7 +252,6 @@ class PhotoOperatorsPage(UserControl):
             dropdown.Option("AND"),
             dropdown.Option("OR"),
             dropdown.Option("XOR"),
-            dropdown.Option("Min"),
             dropdown.Option("Blend"),
             dropdown.Option("Overlay"),
         ]
