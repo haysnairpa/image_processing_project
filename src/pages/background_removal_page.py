@@ -136,13 +136,13 @@ class BackgroundRemovalPage(UserControl):
             self.result_image.seek(0)
 
             # Update the result image
-            self.result_image = ft.Image(
+            result = ft.Image(
                 src_base64 = base64.b64encode(self.result_image.getvalue()).decode("utf-8"),
                 width=300,
                 height=300,
                 fit=ft.ImageFit.CONTAIN,
             )
-            self.result_container.content = self.result_image
+            self.result_container.content = result
             self.download_button.disabled = False
             self.update()
 
