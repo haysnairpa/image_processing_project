@@ -19,6 +19,9 @@ from flet import (
 import base64
 import io
 from PIL import Image as PILImage
+import cv2
+import numpy as np
+import uuid
 
 class PhotoStitchPage(UserControl):
     def __init__(self, page, on_back):
@@ -29,9 +32,7 @@ class PhotoStitchPage(UserControl):
         self.result_image = None
         self.image_grid = None
         self.result_container = None
-        self.copy_button = None
-        self.download_button = None
-        
+        self.preview_dialog = None        
 
     def add_image(self, e):
         def on_result(e: ft.FilePickerResultEvent):
@@ -45,7 +46,7 @@ class PhotoStitchPage(UserControl):
                         border_radius=border_radius.all(10),
                     )
                     self.selected_images.append(img)
-                    self.image_grid.controls.insert(-1, img)
+                    self.add_image_to_grid(img)
                 self.update()
 
         file_picker = ft.FilePicker(on_result=on_result)
@@ -53,43 +54,104 @@ class PhotoStitchPage(UserControl):
         self.page.update()
         file_picker.pick_files(allow_multiple=True)
 
+    def add_image_to_grid(self, img):
+        container = Container(
+            content=Stack(
+                controls=[
+                    img,
+                    IconButton(
+                        icon=ft.icons.CLOSE,
+                        icon_color=colors.RED_400,
+                        icon_size=20,
+                        on_click=lambda _: self.remove_image(img),
+                        top=0,
+                        right=0,
+                    ),
+                ],
+                width=150,
+                height=150,
+
+            ),
+            on_click=lambda _: self.show_preview(img) 
+            
+        )
+        self.image_grid.controls.insert(-1, container)
+
+    def remove_image(self, img):
+        self.selected_images.remove(img)
+        for control in self.image_grid.controls:
+            if isinstance(control.content, Stack) and control.content.controls[0] == img:
+                self.image_grid.controls.remove(control)
+                break
+        self.update()
+
+    def show_preview(self, img):
+        self.preview_dialog = ft.AlertDialog(
+            content=Image(src=img.src, width=400, height=400, fit=ft.ImageFit.CONTAIN),
+            actions=[
+                ft.TextButton("Close", on_click=self.close_preview),
+            ],
+        )
+        self.page.dialog = self.preview_dialog
+        self.preview_dialog.open = True
+        self.page.update()
+
+    def close_preview(self, e):
+        self.preview_dialog.open = False
+        self.page.update()
+
     def stitch_images(self, e):
-        # TODO: Implement actual image stitching
-        # For now, we'll just use the first image as the result
-        if self.selected_images:
-            self.result_image = Image(
-                src=self.selected_images[0].src,
+        if len(self.selected_images) < 2:
+            self.page.show_snack_bar(ft.SnackBar(content=Text("Please select at least two images to stitch.")))
+            return
+
+        imgs = []
+        for img in self.selected_images:
+            pil_img = PILImage.open(img.src)
+            cv_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+            imgs.append(cv_img)
+
+        stitchy = cv2.Stitcher.create()
+        (status, output) = stitchy.stitch(imgs)
+
+        if status != cv2.STITCHER_OK:
+            self.page.show_snack_bar(ft.SnackBar(content=Text("Stitching unsuccessful")))
+        else:
+            # Convert the output image to PIL Image
+            output_rgb = cv2.cvtColor(output, cv2.COLOR_BGR2RGB)
+
+            output_pil = PILImage.fromarray(output_rgb)
+            # Save the stitched image
+
+            # Save the image to an in-memory buffer
+            self.result_image = io.BytesIO()
+            output_pil.save(self.result_image, format="PNG")
+            self.result_image.seek(0)
+            
+            result = Image(
+                src_base64= base64.b64encode(self.result_image.getvalue()).decode("utf-8"),
                 width=760,
                 height=260,
                 fit=ft.ImageFit.CONTAIN,
             )
-            self.result_container.content.controls[0] = self.result_image
+            self.result_container.content.controls[0] = result
             self.update()
-
-    def copy_result(self, e):
-        if self.result_image:
-            # Convert image to base64
-            with open(self.result_image.src, "rb") as image_file:
-                encoded_string = base64.b64encode(image_file.read()).decode()
-            
-            # Set clipboard content
-            self.page.set_clipboard(f"data:image/png;base64,{encoded_string}")
-            self.page.show_snack_bar(ft.SnackBar(content=Text("Image copied to clipboard!")))
-        else:
-            self.page.show_snack_bar(ft.SnackBar(content=Text("You do not stitch any images!")))
 
     def download_result(self, e):
         if self.result_image:
             # Save the image to a file
-            save_path = "stitched_image.png"
-            with open(self.result_image.src, "rb") as src_file, open(save_path, "wb") as dst_file:
-                dst_file.write(src_file.read())
+            unique_id = uuid.uuid4().hex  # Generate a UUID and get its hexadecimal representation
+            # Construct the file path with the UUID
+            save_path = f"stitched_image_{unique_id}.png"
+            with open(save_path, "wb") as dst_file:
+                dst_file.write(self.result_image.getvalue())
             
             # Trigger download
             self.page.launch_url(save_path)
             self.page.show_snack_bar(ft.SnackBar(content=Text("Image downloaded successfully!")))
         else:
             self.page.show_snack_bar(ft.SnackBar(content=Text("You do not stitch any images!")))
+    
 
     def build(self):
         # Back button
@@ -123,7 +185,6 @@ class PhotoStitchPage(UserControl):
             padding=padding.all(20),
         )
 
-        # Image grid with add button
         self.image_grid = GridView(
             expand=1,
             max_extent=150,
@@ -175,7 +236,7 @@ class PhotoStitchPage(UserControl):
             padding=padding.all(20),
             content=Stack(
                 controls=[
-                    Container(  # Wrap the Text in a Container for proper centering
+                    Container(
                         content=Text(
                             "Result will appear here",
                             color=colors.BLACK54,
@@ -201,11 +262,6 @@ class PhotoStitchPage(UserControl):
                     Container(
                         content=Row(
                             controls=[
-                                ElevatedButton(
-                                    text="Copy Image",
-                                    icon=ft.icons.COPY,
-                                    on_click=self.copy_result,
-                                ),
                                 ElevatedButton(
                                     text="Download",
                                     icon=ft.icons.DOWNLOAD,

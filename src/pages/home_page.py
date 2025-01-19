@@ -61,7 +61,6 @@ class HomePage(UserControl):
                 spacing=10,
             ),
             alignment=alignment.center,
-            on_hover=lambda e: e.control.scale(1.05) if e.data == "true" else e.control.scale(1.0),
             on_click=onclick,
         )
     

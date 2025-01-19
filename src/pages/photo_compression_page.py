@@ -1,3 +1,6 @@
+import base64
+import io
+import uuid
 import flet as ft
 from flet import (
     UserControl,
@@ -13,7 +16,14 @@ from flet import (
     border_radius,
     padding,
     colors,
+    FilePickerResultEvent,
+    FilePicker,
 )
+
+import numpy as np
+from PIL import Image as PILImage
+
+from libs.compression_ops import compress_image_dct, compress_image_rle
 
 class PhotoCompressionPage(UserControl):
     def __init__(self, page, on_back):
@@ -24,9 +34,9 @@ class PhotoCompressionPage(UserControl):
         self.result_image = None
         self.image_container = None
         self.result_container = None
-        self.copy_button = None
         self.download_button = None
-        self.compression_slider = None
+        self.method_buttons = None
+        self.selected_method = "RLE"
 
     def add_image(self, e):
         def on_result(e: ft.FilePickerResultEvent):
@@ -48,28 +58,74 @@ class PhotoCompressionPage(UserControl):
 
     def compress_image(self, e):
         if self.selected_image:
-            # TODO: Implement actual image compression
-            # For now, we'll just use the original image as the result
-            self.result_image = Image(
-                src=self.selected_image.src,
+            # Open the image and convert it to a numpy array
+            img = PILImage.open(self.selected_image.src)
+            img_array = np.array(img)
+
+            # Compress the image based on the selected method
+            if self.selected_method == "RLE":
+                compressed_array = compress_image_rle(img_array)
+            else:  # DCT
+                compressed_array = compress_image_dct(img_array)
+
+            # Convert the compressed array back to an image
+            compressed_img = PILImage.fromarray(compressed_array.astype('uint8'))
+
+            # Save the image to an in-memory buffer
+            self.result_image = io.BytesIO()
+            compressed_img.save(self.result_image, format="PNG")
+            self.result_image.seek(0)
+            
+            # Update the result image
+            result = Image(
+                src_base64= base64.b64encode(self.result_image.getvalue()).decode("utf-8"),
                 width=300,
                 height=300,
                 fit=ft.ImageFit.CONTAIN,
             )
-            self.result_container.content = self.result_image
-            self.copy_button.disabled = False
+            self.result_container.content = result
             self.download_button.disabled = False
             self.update()
 
-    def copy_result(self, e):
-        if self.result_image:
-            # TODO: Implement copy functionality
-            self.page.show_snack_bar(ft.SnackBar(content=Text("Image copied to clipboard!")))
-
     def download_result(self, e):
         if self.result_image:
-            # TODO: Implement download functionality
+            # Save the image to a file
+            unique_id = uuid.uuid4().hex  # Generate a UUID and get its hexadecimal representation
+            # Construct the file path with the UUID
+            save_path = f"compressed_image_{unique_id}.png"
+            with open(save_path, "wb") as dst_file:
+                dst_file.write(self.result_image.getvalue())
+            
+            # Trigger download
+            self.page.launch_url(save_path)
             self.page.show_snack_bar(ft.SnackBar(content=Text("Image downloaded successfully!")))
+        else:
+            self.page.show_snack_bar(ft.SnackBar(content=Text("You do not stitch any images!")))
+
+    def save_file_result(self, e: ft.FilePickerResultEvent):
+        if e.path:
+            img = Image.open(self.result_image.src)
+            img.save(e.path)
+            self.page.show_snack_bar(ft.SnackBar(content=Text("Image saved successfully!")))
+
+    def show_preview(self, e):
+        # Add your preview logic here
+        print("Image preview clicked!")
+        pass
+
+    def select_method(self, method):
+        def handle_click(e):
+            self.selected_method = method
+            # Update button styles
+            for btn in self.method_buttons.controls:
+                if btn.data == method:
+                    btn.bgcolor = colors.BLUE_50
+                    btn.border = ft.border.all(width=2, color=colors.BLUE_400)
+                else:
+                    btn.bgcolor = colors.WHITE
+                    btn.border = ft.border.all(width=2, color=colors.BLACK38)
+            self.update()
+        return handle_click
 
     def build(self):
         # Back button
@@ -103,7 +159,7 @@ class PhotoCompressionPage(UserControl):
             padding=padding.all(20),
         )
 
-        # Image container
+        # Image container with preview functionality
         self.image_container = Container(
             width=300,
             height=300,
@@ -116,15 +172,45 @@ class PhotoCompressionPage(UserControl):
                 on_click=self.add_image,
             ),
             alignment=alignment.center,
+            on_click=self.show_preview,
+            ink=True,
         )
 
-        # Compression slider
-        self.compression_slider = Slider(
-            min=0,
-            max=100,
-            divisions=10,
-            label="{value}%",
-            value=50,
+        self.method_buttons = Row(
+            controls=[
+                Container(
+                    content=Text("Run Length Encoding", size=14),
+                    width=200,
+                    height=40,
+                    border=ft.border.all(
+                        width=2,
+                        color=colors.BLUE_400 if self.selected_method == "RLE" else colors.BLACK38
+                    ),
+                    border_radius=border_radius.all(8),
+                    padding=padding.all(10),
+                    alignment=alignment.center,
+                    on_click=self.select_method("RLE"),
+                    bgcolor=colors.BLUE_50 if self.selected_method == "RLE" else colors.WHITE,
+                    data="RLE",  # Store method identifier
+                ),
+                Container(
+                    content=Text("Discreate Cosine Transform", size=14),
+                    width=200,
+                    height=40,
+                    border=ft.border.all(
+                        width=2,
+                        color=colors.BLUE_400 if self.selected_method == "DCT" else colors.BLACK38
+                    ),
+                    border_radius=border_radius.all(8),
+                    padding=padding.all(10),
+                    alignment=alignment.center,
+                    on_click=self.select_method("DCT"),
+                    bgcolor=colors.WHITE,
+                    data="DCT",  # Store method identifier
+                ),
+            ],
+            spacing=10,
+            alignment=ft.MainAxisAlignment.CENTER,
         )
 
         # Compress button
@@ -148,18 +234,43 @@ class PhotoCompressionPage(UserControl):
             alignment=alignment.center,
         )
 
-        # Copy and Download buttons
-        self.copy_button = ElevatedButton(
-            text="Copy Image",
-            icon=ft.icons.COPY,
-            on_click=self.copy_result,
-            disabled=True,
-        )
         self.download_button = ElevatedButton(
             text="Download",
             icon=ft.icons.DOWNLOAD,
             on_click=self.download_result,
             disabled=True,
+        )
+
+        # Main layout with horizontal arrangement
+        main_content = Row(
+            controls=[
+                # Left: Input Image
+                self.image_container,
+                # Center: Compression Slider and Compress Button
+                Column(
+                    controls=[
+                        self.method_buttons,
+                        compress_button,
+                    ],
+                    spacing=20,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                # Right: Output Image and Buttons
+                Column(
+                    controls=[
+                        self.result_container,
+                        Row(
+                            controls=[self.download_button],
+                            alignment=ft.MainAxisAlignment.CENTER,
+                            spacing=10,
+                        ),
+                    ],
+                    spacing=20,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+            ],
+            alignment=ft.MainAxisAlignment.SPACE_EVENLY,
+            spacing=40,
         )
 
         # Main layout
@@ -168,18 +279,7 @@ class PhotoCompressionPage(UserControl):
                 controls=[
                     Row([back_button], alignment=ft.MainAxisAlignment.START),
                     header,
-                    Row(
-                        [self.image_container, self.compression_slider],
-                        alignment=ft.MainAxisAlignment.CENTER,
-                        spacing=20,
-                    ),
-                    compress_button,
-                    self.result_container,
-                    Row(
-                        [self.copy_button, self.download_button],
-                        alignment=ft.MainAxisAlignment.CENTER,
-                        spacing=10,
-                    ),
+                    main_content,
                     Container(
                         content=Text(
                             "Copyright © 2023 by Sona Enterprise",
@@ -203,3 +303,4 @@ class PhotoCompressionPage(UserControl):
 
     def page_resize(self, e):
         self.update()
+

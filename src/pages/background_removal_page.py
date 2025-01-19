@@ -1,3 +1,5 @@
+import base64
+import uuid
 import flet as ft
 from flet import (
     UserControl,
@@ -5,7 +7,6 @@ from flet import (
     Row,
     Column,
     Text,
-    Image,
     IconButton,
     ElevatedButton,
     alignment,
@@ -14,9 +15,13 @@ from flet import (
     colors,
     border,
     Stack,
+    FilePickerResultEvent,
+    SnackBar,
 )
-
-from ..libs.background_removal import remove_background_threshold, remove_background_kmeans
+import numpy as np
+import io
+from PIL import Image
+from libs.background_removal import remove_background_threshold, remove_background_kmeans
 
 class BackgroundRemovalPage(UserControl):
     def __init__(self, page, on_back):
@@ -27,16 +32,15 @@ class BackgroundRemovalPage(UserControl):
         self.result_image = None
         self.image_container = None
         self.result_container = None
-        self.copy_button = None
         self.download_button = None
-        self.selected_method = "ai"
+        self.selected_method = "KMeans"
         self.method_buttons = None
         self.preview_dialog = None
 
     def add_image(self, e):
-        def on_result(e: ft.FilePickerResultEvent):
+        def on_result(e: FilePickerResultEvent):
             if e.files:
-                self.selected_image = Image(
+                self.selected_image = ft.Image(
                     src=e.files[0].path,
                     width=300,
                     height=300,
@@ -89,7 +93,7 @@ class BackgroundRemovalPage(UserControl):
 
     def show_preview(self, e):
         if self.selected_image:
-            preview_image = Image(
+            preview_image = ft.Image(
                 src=self.selected_image.src,
                 fit=ft.ImageFit.CONTAIN,
                 width=800,
@@ -116,27 +120,47 @@ class BackgroundRemovalPage(UserControl):
             self.page.update()
 
     def remove_background(self, e):
-        if self.selected_image and self.selected_method:
-            # TODO: Implement actual background removal
-            # For now, we'll just use the original image as the result
-            self.result_image = Image(
-                src=self.selected_image.src,
+        if self.selected_image:
+            # Remove the background based on the selected method
+            if self.selected_method == "Threshold":
+                result_array = remove_background_threshold(self.selected_image.src)
+            else:  # KMeans
+                result_array = remove_background_kmeans(self.selected_image.src)
+
+            # Convert the result array back to an image
+            result_img = Image.fromarray(result_array.astype('uint8'))
+
+            # Save the image to an in-memory buffer
+            self.result_image = io.BytesIO()
+            result_img.save(self.result_image, format="PNG")
+            self.result_image.seek(0)
+
+            # Update the result image
+            self.result_image = ft.Image(
+                src_base64 = base64.b64encode(self.result_image.getvalue()).decode("utf-8"),
                 width=300,
                 height=300,
                 fit=ft.ImageFit.CONTAIN,
             )
             self.result_container.content = self.result_image
-            self.copy_button.disabled = False
             self.download_button.disabled = False
             self.update()
 
-    def copy_result(self, e):
-        if self.result_image:
-            self.page.show_snack_bar(ft.SnackBar(content=Text("Image copied to clipboard!")))
-
     def download_result(self, e):
         if self.result_image:
+            # Save the image to a file
+            unique_id = uuid.uuid4().hex  # Generate a UUID and get its hexadecimal representation
+            # Construct the file path with the UUID
+            save_path = f"background_removed_image_{unique_id}.png"
+            with open(save_path, "wb") as dst_file:
+                dst_file.write(self.result_image.getvalue())
+            
+            # Trigger download
+            self.page.launch_url(save_path)
             self.page.show_snack_bar(ft.SnackBar(content=Text("Image downloaded successfully!")))
+        else:
+            self.page.show_snack_bar(ft.SnackBar(content=Text("You do not stitch any images!")))
+
 
     def build(self):
         # Back button
@@ -191,34 +215,34 @@ class BackgroundRemovalPage(UserControl):
         self.method_buttons = Row(
             controls=[
                 Container(
-                    content=Text("AI-powered removal", size=14),
+                    content=Text("Threshold Segmentation", size=14),
                     width=200,
                     height=40,
                     border=border.all(
                         width=2,
-                        color=colors.BLUE_400 if self.selected_method == "ai" else colors.BLACK38
+                        color=colors.BLUE_400 if self.selected_method == "Threshold" else colors.BLACK38
                     ),
                     border_radius=border_radius.all(8),
                     padding=padding.all(10),
                     alignment=alignment.center,
-                    on_click=self.select_method("ai"),
-                    bgcolor=colors.BLUE_50 if self.selected_method == "ai" else colors.WHITE,
-                    data="ai",  # Store method identifier
+                    on_click=self.select_method("Threshold"),
+                    bgcolor=colors.BLUE_50 if self.selected_method == "Threshold" else colors.WHITE,
+                    data="Threshold",  # Store method identifier
                 ),
                 Container(
-                    content=Text("Manual selection", size=14),
+                    content=Text("KMeans Segmentation", size=14),
                     width=200,
                     height=40,
                     border=border.all(
                         width=2,
-                        color=colors.BLUE_400 if self.selected_method == "manual" else colors.BLACK38
+                        color=colors.BLUE_400 if self.selected_method == "KMeans" else colors.BLACK38
                     ),
                     border_radius=border_radius.all(8),
                     padding=padding.all(10),
                     alignment=alignment.center,
-                    on_click=self.select_method("manual"),
+                    on_click=self.select_method("KMeans"),
                     bgcolor=colors.WHITE,
-                    data="manual",  # Store method identifier
+                    data="KMeans",  # Store method identifier
                 ),
             ],
             spacing=10,
@@ -246,13 +270,6 @@ class BackgroundRemovalPage(UserControl):
             alignment=alignment.center,
         )
 
-        # Copy and Download buttons
-        self.copy_button = ElevatedButton(
-            text="Copy Image",
-            icon=ft.icons.COPY,
-            on_click=self.copy_result,
-            disabled=True,
-        )
         self.download_button = ElevatedButton(
             text="Download",
             icon=ft.icons.DOWNLOAD,
@@ -279,7 +296,7 @@ class BackgroundRemovalPage(UserControl):
                     controls=[
                         self.result_container,
                         Row(
-                            controls=[self.copy_button, self.download_button],
+                            controls=[self.download_button],
                             alignment=ft.MainAxisAlignment.CENTER,
                             spacing=10,
                         ),
@@ -322,3 +339,4 @@ class BackgroundRemovalPage(UserControl):
 
     def page_resize(self, e):
         self.update()
+

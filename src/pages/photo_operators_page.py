@@ -1,3 +1,6 @@
+import base64
+import io
+import uuid
 import flet as ft
 from flet import (
     UserControl,
@@ -18,7 +21,14 @@ from flet import (
     padding,
     margin,
     colors,
+    FilePickerResultEvent
 )
+
+import numpy as np
+from PIL import Image as PILImage
+
+from libs.mathematical_operations import add_images, subtract_images, multiply_images, divide_images, bitwise_and_images, bitwise_or_images, bitwise_xor_images
+from libs.blend_image import blend_images, overlay_images
 
 class PhotoOperatorsPage(UserControl):
     def __init__(self, page, on_back):
@@ -29,7 +39,6 @@ class PhotoOperatorsPage(UserControl):
         self.result_image = None
         self.image_containers = []
         self.result_container = None
-        self.copy_button = None
         self.download_button = None
         self.operator_dropdown = None
         self.preview_dialog = None
@@ -43,8 +52,8 @@ class PhotoOperatorsPage(UserControl):
             if e.files:
                 img = Image(
                     src=e.files[0].path,
-                    width=150,
-                    height=150,
+                    width=200,
+                    height=200,
                     fit=ft.ImageFit.COVER,
                     border_radius=border_radius.all(10),
                 )
@@ -116,26 +125,70 @@ class PhotoOperatorsPage(UserControl):
 
     def apply_operator(self, e):
         if all(self.selected_images) and self.operator_dropdown.value:
-            # TODO: Implement actual image operation
-            # For now, we'll just use the first image as the result
-            self.result_image = Image(
-                src=self.selected_images[0].src,
+            # Open the images and convert them to numpy arrays
+            img1 = self.selected_images[0].src
+            img2 = self.selected_images[1].src
+
+            # Apply the selected operator
+            operator = self.operator_dropdown.value
+            if operator == "Add":
+                result_array = add_images(img1, img2)
+            elif operator == "Subtract":
+                result_array = subtract_images(img1, img2)
+            elif operator == "Multiply":
+                result_array = multiply_images(img1, img2)
+            elif operator == "Divide":
+                result_array = divide_images(img1, img2)
+            elif operator == "AND":
+                result_array = bitwise_and_images(img1, img2)
+            elif operator == "OR":
+                result_array = bitwise_or_images(img1, img2)
+            elif operator == "XOR":
+                result_array = bitwise_xor_images(img1, img2)
+            elif operator == "Blend":
+                alpha = self.alpha_slider.value
+                beta = self.beta_slider.value
+                gamma = float(self.gamma_input.value)
+                result_array = blend_images(img1, img2, alpha, beta, gamma)
+            elif operator == "Overlay":
+                result_array = overlay_images(img1, img2)
+            else:
+                return
+
+            # Convert the result array back to an image
+            result_img = PILImage.fromarray(result_array.astype('uint8'))
+
+            # Save the image to an in-memory buffer
+            self.result_image = io.BytesIO()
+            result_img.save(self.result_image, format="PNG")
+            self.result_image.seek(0)
+
+            # Update the result image
+            result = Image(
+                src_base64= base64.b64encode(self.result_image.getvalue()).decode("utf-8"),
                 width=300,
                 height=300,
                 fit=ft.ImageFit.CONTAIN,
             )
-            self.result_container.content = self.result_image
-            self.copy_button.disabled = False
+            self.result_container.content = result
             self.download_button.disabled = False
             self.update()
 
-    def copy_result(self, e):
-        if self.result_image:
-            self.page.show_snack_bar(ft.SnackBar(content=Text("Image copied to clipboard!")))
-
     def download_result(self, e):
         if self.result_image:
+            # Save the image to a file
+            unique_id = uuid.uuid4().hex  # Generate a UUID and get its hexadecimal representation
+            # Construct the file path with the UUID
+            save_path = f"operated_image_{unique_id}.png"
+            with open(save_path, "wb") as dst_file:
+                dst_file.write(self.result_image.getvalue())
+            
+            # Trigger download
+            self.page.launch_url(save_path)
             self.page.show_snack_bar(ft.SnackBar(content=Text("Image downloaded successfully!")))
+        else:
+            self.page.show_snack_bar(ft.SnackBar(content=Text("You do not stitch any images!")))
+
 
     def build(self):
         # Back button
@@ -172,8 +225,8 @@ class PhotoOperatorsPage(UserControl):
         # Image containers with preview functionality
         self.image_containers = [
             Container(
-                width=150,
-                height=150,
+                width=200,
+                height=200,
                 border_radius=border_radius.all(10),
                 bgcolor=colors.BLUE_50,
                 content=IconButton(
@@ -200,9 +253,8 @@ class PhotoOperatorsPage(UserControl):
             dropdown.Option("OR"),
             dropdown.Option("XOR"),
             dropdown.Option("Min"),
-            dropdown.Option("Max"),
-            dropdown.Option("Average"),
             dropdown.Option("Blend"),
+            dropdown.Option("Overlay"),
         ]
         
         self.operator_dropdown = Dropdown(
@@ -280,13 +332,7 @@ class PhotoOperatorsPage(UserControl):
             alignment=alignment.center,
         )
 
-        # Copy and Download buttons
-        self.copy_button = ElevatedButton(
-            text="Copy Image",
-            icon=ft.icons.COPY,
-            on_click=self.copy_result,
-            disabled=True,
-        )
+        
         self.download_button = ElevatedButton(
             text="Download",
             icon=ft.icons.DOWNLOAD,
@@ -324,7 +370,7 @@ class PhotoOperatorsPage(UserControl):
             controls=[
                 self.result_container,
                 Row(
-                    controls=[self.copy_button, self.download_button],
+                    controls=[self.download_button],
                     alignment=ft.MainAxisAlignment.CENTER,
                     spacing=10,
                 ),
@@ -374,3 +420,4 @@ class PhotoOperatorsPage(UserControl):
 
     def page_resize(self, e):
         self.update()
+
