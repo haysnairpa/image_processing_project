@@ -16,6 +16,11 @@ from flet import (
     transform,
     Stack,
 )
+from .basic_ops import basic_operations_page
+from .photo_stitch_page import PhotoStitchPage
+from .background_removal_page import BackgroundRemovalPage
+from .photo_compression_page import PhotoCompressionPage
+from .photo_operators_page import PhotoOperatorsPage
 
 class HomePage(UserControl):
     def __init__(self):
@@ -27,7 +32,7 @@ class HomePage(UserControl):
         self.gallery = None
         self.footer = None
 
-    def create_card(self, icon: str, title: str, subtitle: str, width=180, height=180):
+    def create_card(self, icon: str, title: str, subtitle: str, onclick, width=180, height=180):
         return Container(
             width=width,
             height=height,
@@ -46,6 +51,7 @@ class HomePage(UserControl):
                         icon=icon,
                         icon_color=colors.BLUE_400,
                         icon_size=40,
+                        on_click = onclick
                     ),
                     Text(title, size=16, color=colors.BLACK87, weight="bold"),
                     Text(subtitle, size=12, color=colors.BLACK54, text_align=ft.TextAlign.CENTER),
@@ -56,9 +62,49 @@ class HomePage(UserControl):
             ),
             alignment=alignment.center,
             on_hover=lambda e: e.control.scale(1.05) if e.data == "true" else e.control.scale(1.0),
-            on_click=lambda _: print(f"{title} clicked"),
+            on_click=onclick,
         )
     
+    def navigate_to_photos_editor(self, e):
+        self.page.clean()
+        page = basic_operations_page(
+            self.page,
+            lambda _: self.show_home())
+        self.page.add(page)
+    
+    def navigate_to_photos_stitch(self, e):
+        self.page.clean()
+        page = PhotoStitchPage(
+            self.page,
+            lambda _: self.show_home())
+        self.page.add(page)
+
+    def navigate_to_photo_compression(self, e):
+        self.page.clean()
+        page = PhotoCompressionPage(
+            self.page,
+            lambda _: self.show_home())
+        self.page.add(page)
+
+    def navigate_to_photos_operator(self, e):
+        self.page.clean()
+        page = PhotoOperatorsPage(
+            self.page,
+            lambda _: self.show_home())
+        self.page.add(page)
+
+    def navigate_to_background_removal(self, e):
+        self.page.clean()
+        page = BackgroundRemovalPage(
+            self.page, 
+            lambda _: self.show_home())
+        self.page.add(page)
+
+    def show_home(self):
+        self.page.clean()
+        self.page.add(self)
+        self.page.update()
+
     def create_header(self, title: str):
         return Container(
             padding=padding.symmetric(horizontal=30, vertical=20),
@@ -124,11 +170,26 @@ class HomePage(UserControl):
             padding=padding.all(30),
             content=Row(
                 controls=[
-                    self.create_card(ft.icons.AUTO_AWESOME, "Photo Editor", "Enhance photos instantly with powerful editing tools"),
-                    self.create_card(ft.icons.FILTER, "Photo Operators", "Apply AI-powered filters to transform your images"),
-                    self.create_card(ft.icons.FACE_RETOUCHING_NATURAL, "Photo Compression", "Compress photos without compromising quality"),
-                    self.create_card(ft.icons.STYLE, "Background Removal", "Remove backgrounds effortlessly for creative designs"),
-                    self.create_card(ft.icons.ADD_PHOTO_ALTERNATE, "Photo Stitching", "Seamlessly stitch multiple photos into one"),
+                    self.create_card(
+                        ft.icons.AUTO_AWESOME, "Photo Editor", 
+                        "Enhance photos instantly with powerful editing tools", 
+                        lambda e: self.navigate_to_photos_editor(e)),
+                    self.create_card(
+                        ft.icons.FILTER, "Photo Operators", 
+                        "Apply AI-powered filters to transform your images", 
+                        lambda e: self.navigate_to_photos_operator(e)),
+                    self.create_card(
+                        ft.icons.FACE_RETOUCHING_NATURAL, "Photo Compression", 
+                        "Compress photos without compromising quality", 
+                        lambda e: self.navigate_to_photo_compression(e)),
+                    self.create_card(
+                        ft.icons.STYLE, "Background Removal", 
+                        "Remove backgrounds effortlessly for creative designs", 
+                        lambda e: self.navigate_to_background_removal(e)),
+                    self.create_card(
+                        ft.icons.ADD_PHOTO_ALTERNATE, "Photo Stitching", 
+                        "Seamlessly stitch multiple photos into one", 
+                        lambda e: self.navigate_to_photos_stitch(e)),
                 ],
                 alignment=ft.MainAxisAlignment.CENTER,
                 spacing=20,
