@@ -21,6 +21,10 @@ from flet import (
     FloatingActionButtonLocation,
     animation,
     transform,
+    GestureDetector,
+    MouseCursor,
+    border,
+    alignment,
 )
 from PIL import Image as PILImage, ImageOps, ImageEnhance, ImageDraw
 import io
@@ -30,6 +34,13 @@ import base64
 def basic_operations_page(page: Page):
     uploaded_image = None  # Original image
     processed_image = None  # Processed image (stateful)
+
+    # State variables for cropping
+    is_cropping = False
+    crop_start_x = 0
+    crop_start_y = 0
+    crop_end_x = 0
+    crop_end_y = 0
 
     def upload_image(e: FilePickerResultEvent):
         nonlocal uploaded_image, processed_image
@@ -94,10 +105,44 @@ def basic_operations_page(page: Page):
             show_image(processed_image, "Color Manipulation")
 
     # Functionality: Cropping
-    def apply_crop(e):
-        nonlocal processed_image
-        if processed_image:
-            x1, y1, x2, y2 = map(int, crop_coordinates.value.split(","))
+    def start_crop(e):
+        nonlocal is_cropping, crop_start_x, crop_start_y
+        is_cropping = True
+        crop_start_x = e.local_x
+        crop_start_y = e.local_y
+        crop_overlay.visible = True
+        crop_overlay.left = crop_start_x
+        crop_overlay.top = crop_start_y
+        page.update()
+
+    def update_crop(e):
+        nonlocal crop_end_x, crop_end_y
+        if is_cropping:
+            crop_end_x = e.local_x
+            crop_end_y = e.local_y
+            
+            # Update overlay position and size
+            crop_overlay.width = abs(crop_end_x - crop_start_x)
+            crop_overlay.height = abs(crop_end_y - crop_start_y)
+            crop_overlay.left = min(crop_start_x, crop_end_x)
+            crop_overlay.top = min(crop_start_y, crop_end_y)
+            page.update()
+
+    def end_crop(e):
+        nonlocal is_cropping, processed_image
+        if is_cropping and processed_image:
+            is_cropping = False
+            crop_overlay.visible = False
+            
+            # Convert coordinates
+            scale_x = processed_image.width / image_display.width
+            scale_y = processed_image.height / image_display.height
+            
+            x1 = int(min(crop_start_x, crop_end_x) * scale_x)
+            y1 = int(min(crop_start_y, crop_end_y) * scale_y)
+            x2 = int(max(crop_start_x, crop_end_x) * scale_x)
+            y2 = int(max(crop_start_y, crop_end_y) * scale_y)
+            
             processed_image = processed_image.crop((x1, y1, x2, y2))
             show_image(processed_image, "Cropped Image")
 
@@ -105,19 +150,40 @@ def basic_operations_page(page: Page):
     def apply_scaling(e):
         nonlocal processed_image
         if processed_image:
-            scale = float(scale_slider.value)
-            width = int(processed_image.width * scale)
-            height = int(processed_image.height * scale)
-            processed_image = processed_image.resize((width, height))
-            show_image(processed_image, f"Scaled: {scale}x")
+            try:
+                scale = float(scale_slider.value)
+                
+                # Get original dimensions
+                orig_width = processed_image.width
+                orig_height = processed_image.height
+                
+                # Calculate new dimensions
+                if maintain_aspect.value:
+                    new_width = int(orig_width * scale)
+                    new_height = int(orig_height * scale)
+                else:
+                    new_width = int(orig_width * scale)
+                    new_height = int(orig_height * scale)
+                
+                # Resize image - ganti Image.Resampling.LANCZOS dengan PILImage.LANCZOS
+                processed_image = processed_image.resize(
+                    (new_width, new_height), 
+                    PILImage.LANCZOS
+                )
+                show_image(processed_image, f"Scaled: {scale}x")
+                
+            except Exception as e:
+                print(f"Error in scaling: {str(e)}")
+                image_title.value = f"Error scaling image: {str(e)}"
+                page.update()
 
-    # Functionality: Image Blending
-    def apply_blending(e):
-        nonlocal processed_image
-        if processed_image and uploaded_image:
-            alpha = blend_slider.value
-            processed_image = PILImage.blend(uploaded_image, processed_image, alpha)
-            show_image(processed_image, f"Blended with alpha {alpha}")
+    # # Functionality: Image Blending
+    # def apply_blending(e):
+    #     nonlocal processed_image
+    #     if processed_image and uploaded_image:
+    #         alpha = blend_slider.value
+    #         processed_image = PILImage.blend(uploaded_image, processed_image, alpha)
+    #         show_image(processed_image, f"Blended with alpha {alpha}")
 
     # Functionality: Flip
     def apply_flip(e):
@@ -188,15 +254,15 @@ def basic_operations_page(page: Page):
             processed_image = ImageOps.expand(processed_image, border=thickness, fill=color)
             show_image(processed_image, f"Border: {color}, {thickness}px")
 
-    # Overlay
-    def apply_overlay(e):
-        """Overlay a secondary image onto the primary image with transparency."""
-        nonlocal processed_image
-        if processed_image and secondary_image:
-            overlay_alpha = overlay_transparency.value
-            overlay_resized = secondary_image.resize(processed_image.size)
-            processed_image = PILImage.blend(processed_image, overlay_resized, overlay_alpha)
-            show_image(processed_image, f"Overlay with alpha {overlay_alpha}")
+    # # Overlay
+    # def apply_overlay(e):
+    #     """Overlay a secondary image onto the primary image with transparency."""
+    #     nonlocal processed_image
+    #     if processed_image and secondary_image:
+    #         overlay_alpha = overlay_transparency.value
+    #         overlay_resized = secondary_image.resize(processed_image.size)
+    #         processed_image = PILImage.blend(processed_image, overlay_resized, overlay_alpha)
+    #         show_image(processed_image, f"Overlay with alpha {overlay_alpha}")
 
     # UI Components
     file_picker = FilePicker(on_result=upload_image)
@@ -207,7 +273,18 @@ def basic_operations_page(page: Page):
     green_slider = Slider(min=0, max=255, value=0, label="Green")
     blue_slider = Slider(min=0, max=255, value=0, label="Blue")
     
-    scale_slider = Slider(min=0.1, max=2.0, value=1.0, label="Scale")
+    scale_slider = Slider(
+        min=0.1,
+        max=2.0,
+        value=1.0,
+        label="Scale",
+        on_change=lambda _: page.update()
+    )
+    maintain_aspect = Checkbox(
+        label="Maintain Aspect Ratio",
+        value=True,
+        on_change=lambda _: page.update()
+    )
     translation_x = TextField(value="0", label="X", width=100)
     translation_y = TextField(value="0", label="Y", width=100)
     rotation_angle = TextField(value="0", label="Angle", width=100)
@@ -240,13 +317,30 @@ def basic_operations_page(page: Page):
     image_display = Image(width=400, height=600, fit="contain")
     image_title = Text("No image uploaded", size=16, weight="bold")
 
-    # Then define control groups
+    # Define basic controls first
     basic_controls = Row(
         [
             ElevatedButton("Upload Image", on_click=lambda _: file_picker.pick_files(allow_multiple=False)),
             ElevatedButton("Reset Image", on_click=reset_image),
+            ElevatedButton("Start Crop", on_click=lambda _: setattr(crop_gesture, "visible", True)),
         ],
         alignment="center"
+    )
+
+    # Define control groups
+    transform_controls = Column(
+        [
+            Text("Image Transformations", size=14, weight="bold"),
+            Row(
+                [
+                    ElevatedButton("Grayscale", on_click=apply_grayscale),
+                    ElevatedButton("Negative", on_click=apply_negative),
+                    flip_dropdown,
+                    ElevatedButton("Flip", on_click=apply_flip),
+                ],
+                wrap=True
+            ),
+        ]
     )
 
     color_controls = Column(
@@ -265,21 +359,6 @@ def basic_operations_page(page: Page):
         ]
     )
 
-    transform_controls = Column(
-        [
-            Text("Image Transformations", size=14, weight="bold"),
-            Row(
-                [
-                    ElevatedButton("Grayscale", on_click=apply_grayscale),
-                    ElevatedButton("Negative", on_click=apply_negative),
-                    flip_dropdown,
-                    ElevatedButton("Flip", on_click=apply_flip),
-                ],
-                wrap=True
-            ),
-        ]
-    )
-
     geometry_controls = Column(
         [
             Text("Geometry", size=14, weight="bold"),
@@ -287,6 +366,7 @@ def basic_operations_page(page: Page):
                 [
                     Column([
                         scale_slider,
+                        maintain_aspect,
                         Row([translation_x, translation_y]),
                         rotation_angle,
                     ], expand=True),
@@ -334,64 +414,97 @@ def basic_operations_page(page: Page):
         ]
     )
 
-    # Wrap all controls in a scrollable container
-    controls_container = Container(
+    # Create crop overlay container
+    crop_overlay = Container(
+        visible=False,
+        border=border.all(2, "white"),
+        bgcolor="#80000000",
+    )
+
+    # Update image container
+    image_container = Container(
+        content=Stack([
+            image_display,
+            crop_overlay,
+        ]),
+        width=400,
+        height=600,
+    )
+
+    # Create gesture detector
+    crop_gesture = GestureDetector(
+        content=image_container,
+        on_pan_start=start_crop,
+        on_pan_update=update_crop,
+        on_pan_end=end_crop,
+        mouse_cursor=MouseCursor.MOVE,
+    )
+
+    # Then create main layout
+    main_content = Container(
         content=Column(
             [
-                basic_controls,
-                transform_controls,
-                geometry_controls, 
-                color_controls,
-                enhancement_controls,
-                effects_controls,
-            ],
-            spacing=20,
-            scroll=ScrollMode.AUTO,
-            height=800,  # Match image height
-        ),
-        width=400,   # Fixed width for controls
-        bgcolor="#000000",  # Light background for controls area
-        padding=20,
-    )
-
-    # Back button with nice design
-    back_button = Container(
-        content=IconButton(
-            icon=Icons.ARROW_BACK,
-            icon_color="white",
-            on_click=lambda _: page.go("/"),
-            tooltip="Back to Home",
-        ),
-        bgcolor="#2196F3",
-        border_radius=30,
-        padding=5,
-        margin=10,
-        offset=transform.Offset(-0.45, 0),
-        animate_offset=animation.Animation(300, "easeOut"),
-    )
-
-    return View(
-        controls=[
-            Stack([  # Use Stack to overlay back button
+                Container(  # Header container
+                    content=Row(
+                        [
+                            IconButton(
+                                icon=Icons.ARROW_BACK,
+                                icon_color="white",
+                                on_click=lambda _: page.go("/"),
+                                tooltip="Back to Home",
+                            ),
+                            image_title,
+                        ],
+                        alignment="center",
+                    ),
+                    padding=10,
+                ),
                 Container(  # Main content container
                     content=Row(
                         [
-                            # Left side - Image
-                            Container(
+                            Container(  # Controls container with scroll - left
                                 content=Column(
-                                    [image_title, image_display],
-                                    horizontal_alignment="center",
+                                    [
+                                        basic_controls,
+                                        transform_controls,
+                                        geometry_controls, 
+                                        color_controls,
+                                        enhancement_controls,
+                                        effects_controls,
+                                    ],
+                                    spacing=20,
+                                    scroll=ScrollMode.ALWAYS,
+                                    height=600,
                                 ),
-                                expand=True,
+                                width=300,  # Reduced width for controls
+                                bgcolor="#000000",
+                                padding=20,
+                                border_radius=10,
+                                margin=10,
                             ),
-                            # Right side - Controls
-                            controls_container,
+                            Container(  # Image container - right
+                                content=crop_gesture,
+                                expand=True,  # Take remaining space
+                                height=600,
+                                margin=10,
+                                alignment=alignment.center,  # Center the image
+                            ),
                         ],
-                        spacing=20,
-                        height=page.window.height,  # Updated to new property
+                        spacing=0,
+                        alignment="start",
                     ),
+                    padding=10,
                 ),
-                back_button,  # Floating back button
-            ]),
-        ],
+            ],
+            spacing=0,
+            horizontal_alignment="center",
+        ),
+        expand=True,  # Make container take full width
+    )
+
+    return View(
+        controls=[main_content],
+        padding=0,
+        bgcolor="#1a1a1a",
+        scroll=ScrollMode.AUTO,
     )
