@@ -65,7 +65,7 @@ class HomePage(UserControl):
         )
     
     def navigate_to_photos_editor(self, e):
-        self.page.clean()
+        self.page.go("/basic-ops")
         page = basic_operations_page(
             self.page)
         self.page.add(page)
@@ -226,16 +226,20 @@ class HomePage(UserControl):
         )
 
         # Main layout
-        return Column(
-            controls=[
-                self.hero_section,
-                self.buttons_header,
-                self.buttons_section,
-                self.sample_header,
-                self.gallery,
-                self.footer,
-            ],
-            spacing=20,
+        return Container(
+            content=Column(
+                controls=[
+                    self.hero_section,
+                    self.buttons_header,
+                    self.buttons_section,
+                    self.sample_header,
+                    self.gallery,
+                    self.footer,
+                ],
+                spacing=20,
+                scroll=ScrollMode.AUTO,
+            ),
+            expand=True,
         )
 
     def page_resize(self, e):

@@ -29,9 +29,17 @@ from flet import (
 from PIL import Image as PILImage, ImageOps, ImageEnhance, ImageDraw
 import io
 import base64
+import cv2
+import numpy as np
+import os
+import time
+import scipy.signal
 
 
-def basic_operations_page(page: Page):
+def basic_operations_page(page: Page, on_back=None):
+    page.title = "Photo Editor"
+    page.bgcolor = "#1a1a1a"
+    page.padding = 0
     uploaded_image = None  # Original image
     processed_image = None  # Processed image (stateful)
 
@@ -42,6 +50,7 @@ def basic_operations_page(page: Page):
     crop_end_x = 0
     crop_end_y = 0
 
+    # Definisi fungsi upload terlebih dahulu
     def upload_image(e: FilePickerResultEvent):
         nonlocal uploaded_image, processed_image
         if e.files:
@@ -49,6 +58,111 @@ def basic_operations_page(page: Page):
             uploaded_image = PILImage.open(file_path)
             processed_image = uploaded_image.copy()  # Initialize processed image
             show_image(processed_image, "Uploaded Image")
+
+    def handle_save_result(e: FilePickerResultEvent):
+        if e.path:
+            try:
+                processed_image.save(e.path)
+                image_title.value = f"Image saved to: {e.path}"
+                image_title.update()
+            except Exception as e:
+                print(f"Error saving image: {str(e)}")
+                if image_title:
+                    image_title.value = f"Error saving image: {str(e)}"
+                    image_title.update()
+
+    # Kemudian inisialisasi FilePicker
+    file_picker = FilePicker(on_result=upload_image)
+    page.overlay.append(file_picker)
+
+    save_file_dialog = FilePicker(
+        on_result=handle_save_result
+    )
+    page.overlay.append(save_file_dialog)
+
+    # Definisikan semua fungsi processing di sini, sebelum UI components
+    def apply_fourier_transform(e):
+        nonlocal processed_image
+        if processed_image:
+            img_array = np.array(processed_image.convert('L'))
+            f_transform = np.fft.fft2(img_array)
+            f_shift = np.fft.fftshift(f_transform)
+            magnitude_spectrum = 20 * np.log(np.abs(f_shift))
+            processed_image = PILImage.fromarray(np.uint8(magnitude_spectrum))
+            show_image(processed_image, "Fourier Transform Applied")
+
+    def apply_mean_filter(e):
+        nonlocal processed_image
+        if processed_image:
+            img_array = np.array(processed_image)
+            kernel = np.ones((5,5), np.float32)/25
+            filtered = cv2.filter2D(img_array, -1, kernel)
+            processed_image = PILImage.fromarray(filtered)
+            show_image(processed_image, "Mean Filter Applied")
+
+    def apply_gaussian_filter(e):
+        nonlocal processed_image
+        if processed_image:
+            img_array = np.array(processed_image)
+            filtered = cv2.GaussianBlur(img_array, (5,5), 0)
+            processed_image = PILImage.fromarray(filtered)
+            show_image(processed_image, "Gaussian Filter Applied")
+
+    def apply_median_filter(e):
+        nonlocal processed_image
+        if processed_image:
+            img_array = np.array(processed_image)
+            filtered = cv2.medianBlur(img_array, 3)
+            processed_image = PILImage.fromarray(filtered)
+            show_image(processed_image, "Median Filter Applied")
+
+    def apply_sobel_filter(e):
+        nonlocal processed_image
+        if processed_image:
+            img_array = np.array(processed_image.convert('L'))
+            sobelx = cv2.Sobel(img_array, cv2.CV_64F, 1, 0, ksize=3)
+            sobely = cv2.Sobel(img_array, cv2.CV_64F, 0, 1, ksize=3)
+            magnitude = np.sqrt(sobelx**2 + sobely**2)
+            processed_image = PILImage.fromarray(np.uint8(magnitude))
+            show_image(processed_image, "Sobel Filter Applied")
+
+    def apply_canny_filter(e):
+        nonlocal processed_image
+        if processed_image:
+            img_array = np.array(processed_image.convert('L'))
+            edges = cv2.Canny(img_array, 100, 200)
+            processed_image = PILImage.fromarray(edges)
+            show_image(processed_image, "Canny Edge Detection Applied")
+
+    def apply_laplacian_filter(e):
+        nonlocal processed_image
+        if processed_image:
+            img_array = np.array(processed_image.convert('L'))
+            laplacian = cv2.Laplacian(img_array, cv2.CV_64F)
+            processed_image = PILImage.fromarray(np.uint8(np.absolute(laplacian)))
+            show_image(processed_image, "Laplacian Filter Applied")
+
+    def apply_histogram_equalization(e):
+        nonlocal processed_image
+        if processed_image:
+            img_array = np.array(processed_image)
+            if len(img_array.shape) == 3:
+                img_yuv = cv2.cvtColor(img_array, cv2.COLOR_RGB2YUV)
+                img_yuv[:,:,0] = cv2.equalizeHist(img_yuv[:,:,0])
+                result = cv2.cvtColor(img_yuv, cv2.COLOR_YUV2RGB)
+            else:
+                result = cv2.equalizeHist(img_array)
+            processed_image = PILImage.fromarray(result)
+            show_image(processed_image, "Histogram Equalization Applied")
+
+    def apply_contrast_stretching(e):
+        nonlocal processed_image
+        if processed_image:
+            img_array = np.array(processed_image)
+            p2, p98 = np.percentile(img_array, (2, 98))
+            result = np.clip(((img_array - p2) / (p98 - p2) * 255), 0, 255).astype(np.uint8)
+            processed_image = PILImage.fromarray(result)
+            show_image(processed_image, "Contrast Stretching Applied")
 
     def reset_image(e):
         nonlocal processed_image
@@ -66,13 +180,20 @@ def basic_operations_page(page: Page):
             img.save(buf, format="PNG")
             buf.seek(0)
             img_base64 = base64.b64encode(buf.getvalue()).decode()
-            image_display.src_base64 = img_base64
-            image_title.value = title
-            page.update()
+            
+            # Pastikan image_display dan image_title sudah diinisialisasi
+            if image_display and image_title:
+                image_display.src_base64 = img_base64
+                image_title.value = title
+                
+                # Update hanya komponen yang berubah
+                image_display.update()
+                image_title.update()
         except Exception as e:
             print(f"Error showing image: {e}")
-            image_title.value = f"Error: {str(e)}"
-            page.update()
+            if image_title:
+                image_title.value = f"Error: {str(e)}"
+                image_title.update()
 
     # Functionality: Grayscale
     def apply_grayscale(e):
@@ -113,7 +234,7 @@ def basic_operations_page(page: Page):
         crop_overlay.visible = True
         crop_overlay.left = crop_start_x
         crop_overlay.top = crop_start_y
-        page.update()
+        crop_overlay.update()  # Update hanya overlay
 
     def update_crop(e):
         nonlocal crop_end_x, crop_end_y
@@ -126,7 +247,7 @@ def basic_operations_page(page: Page):
             crop_overlay.height = abs(crop_end_y - crop_start_y)
             crop_overlay.left = min(crop_start_x, crop_end_x)
             crop_overlay.top = min(crop_start_y, crop_end_y)
-            page.update()
+            crop_overlay.update()  # Update hanya overlay
 
     def end_crop(e):
         nonlocal is_cropping, processed_image
@@ -143,8 +264,16 @@ def basic_operations_page(page: Page):
             x2 = int(max(crop_start_x, crop_end_x) * scale_x)
             y2 = int(max(crop_start_y, crop_end_y) * scale_y)
             
-            processed_image = processed_image.crop((x1, y1, x2, y2))
-            show_image(processed_image, "Cropped Image")
+            # Crop image
+            try:
+                cropped = processed_image.crop((x1, y1, x2, y2))
+                processed_image = cropped
+                show_image(processed_image, "Cropped Image")
+            except Exception as e:
+                print(f"Error cropping: {str(e)}")
+                if image_title:
+                    image_title.value = f"Error cropping image: {str(e)}"
+                    image_title.update()
 
     # Functionality: Scaling
     def apply_scaling(e):
@@ -165,17 +294,20 @@ def basic_operations_page(page: Page):
                     new_width = int(orig_width * scale)
                     new_height = int(orig_height * scale)
                 
-                # Resize image - ganti Image.Resampling.LANCZOS dengan PILImage.LANCZOS
+                # Resize image
                 processed_image = processed_image.resize(
                     (new_width, new_height), 
                     PILImage.LANCZOS
                 )
+                
+                # Update image display tanpa page.update()
                 show_image(processed_image, f"Scaled: {scale}x")
                 
             except Exception as e:
                 print(f"Error in scaling: {str(e)}")
-                image_title.value = f"Error scaling image: {str(e)}"
-                page.update()
+                if image_title:
+                    image_title.value = f"Error scaling image: {str(e)}"
+                    image_title.update()
 
     # # Functionality: Image Blending
     # def apply_blending(e):
@@ -264,6 +396,75 @@ def basic_operations_page(page: Page):
     #         processed_image = PILImage.blend(processed_image, overlay_resized, overlay_alpha)
     #         show_image(processed_image, f"Overlay with alpha {overlay_alpha}")
 
+    # Definisi fungsi save_image di awal
+    def save_image(e):
+        if processed_image:
+            try:
+                save_file_dialog.save_file(
+                    allowed_extensions=["png", "jpg", "jpeg"],
+                    file_name="processed_image.png"
+                )
+            except Exception as e:
+                print(f"Error saving image: {str(e)}")
+                if image_title:
+                    image_title.value = f"Error saving image: {str(e)}"
+                    image_title.update()
+
+    def apply_wiener_filter(e):
+        nonlocal processed_image
+        if processed_image:
+            # Konversi ke array numpy
+            img_array = np.array(processed_image)
+            
+            # Jika gambar berwarna, proses setiap channel
+            if len(img_array.shape) == 3:
+                result = np.zeros_like(img_array)
+                for i in range(3):
+                    result[:,:,i] = scipy.signal.wiener(img_array[:,:,i], (5,5))
+            else:
+                result = scipy.signal.wiener(img_array, (5,5))
+            
+            processed_image = PILImage.fromarray(np.uint8(result))
+            show_image(processed_image, "Wiener Filter Applied")
+
+    # Kemudian definisikan UI components
+    filtering_controls = Column(
+        [
+            Text("Filtering & Edge Detection", size=14, weight="bold"),
+            Row(
+                [
+                    ElevatedButton("Fourier Transform", on_click=apply_fourier_transform),
+                    ElevatedButton("Mean Filter", on_click=apply_mean_filter),
+                    ElevatedButton("Gaussian Filter", on_click=apply_gaussian_filter),
+                    ElevatedButton("Median Filter", on_click=apply_median_filter),
+                    ElevatedButton("Wiener Filter", on_click=apply_wiener_filter),
+                ],
+                wrap=True
+            ),
+            Row(
+                [
+                    ElevatedButton("Sobel Edge", on_click=apply_sobel_filter),
+                    ElevatedButton("Canny Edge", on_click=apply_canny_filter),
+                    ElevatedButton("Laplacian", on_click=apply_laplacian_filter),
+                ],
+                wrap=True
+            ),
+        ]
+    )
+
+    enhancement_controls = Column(
+        [
+            Text("Enhancement", size=14, weight="bold"),
+            Row(
+                [
+                    ElevatedButton("Histogram Equalization", on_click=apply_histogram_equalization),
+                    ElevatedButton("Contrast Stretching", on_click=apply_contrast_stretching),
+                ],
+                wrap=True
+            ),
+        ]
+    )
+
     # UI Components
     file_picker = FilePicker(on_result=upload_image)
     page.overlay.append(file_picker)
@@ -278,12 +479,10 @@ def basic_operations_page(page: Page):
         max=2.0,
         value=1.0,
         label="Scale",
-        on_change=lambda _: page.update()
     )
     maintain_aspect = Checkbox(
         label="Maintain Aspect Ratio",
         value=True,
-        on_change=lambda _: page.update()
     )
     translation_x = TextField(value="0", label="X", width=100)
     translation_y = TextField(value="0", label="Y", width=100)
@@ -318,13 +517,31 @@ def basic_operations_page(page: Page):
     image_title = Text("No image uploaded", size=16, weight="bold")
 
     # Define basic controls first
-    basic_controls = Row(
+    basic_controls = Column(
         [
-            ElevatedButton("Upload Image", on_click=lambda _: file_picker.pick_files(allow_multiple=False)),
-            ElevatedButton("Reset Image", on_click=reset_image),
-            ElevatedButton("Start Crop", on_click=lambda _: setattr(crop_gesture, "visible", True)),
+            Text("Basic Controls", size=14, weight="bold"),
+            Row(
+                [
+                    ElevatedButton("Upload Image", on_click=lambda _: file_picker.pick_files(allow_multiple=False)),
+                    ElevatedButton("Reset Image", on_click=reset_image),
+                ],
+                wrap=True,
+                spacing=10,
+            ),
+            Row(
+                [
+                    ElevatedButton("Start Crop", on_click=lambda _: setattr(crop_gesture, "visible", True)),
+                    ElevatedButton(
+                        "Download Image", 
+                        on_click=save_image,
+                        disabled=lambda: processed_image is None
+                    ),
+                ],
+                wrap=True,
+                spacing=10,
+            ),
         ],
-        alignment="center"
+        spacing=10,
     )
 
     # Define control groups
@@ -376,40 +593,6 @@ def basic_operations_page(page: Page):
                         ElevatedButton("Rotate", on_click=apply_rotation),
                     ])
                 ]
-            ),
-        ]
-    )
-
-    enhancement_controls = Column(
-        [
-            Text("Enhancements", size=14, weight="bold"),
-            Row(
-                [
-                    Column([
-                        brightness_slider,
-                        contrast_slider,
-                    ], expand=True),
-                    Column([
-                        ElevatedButton("Brightness", on_click=apply_brightness),
-                        ElevatedButton("Contrast", on_click=apply_contrast),
-                    ])
-                ]
-            ),
-        ]
-    )
-
-    effects_controls = Column(
-        [
-            Text("Effects", size=14, weight="bold"),
-            Row(
-                [
-                    filter_dropdown,
-                    ElevatedButton("Apply Filter", on_click=apply_color_filter),
-                    border_thickness,
-                    border_color,
-                    ElevatedButton("Add Border", on_click=apply_border),
-                ],
-                wrap=True
             ),
         ]
     )
@@ -470,13 +653,13 @@ def basic_operations_page(page: Page):
                                         geometry_controls, 
                                         color_controls,
                                         enhancement_controls,
-                                        effects_controls,
+                                        filtering_controls,
                                     ],
                                     spacing=20,
                                     scroll=ScrollMode.ALWAYS,
                                     height=600,
                                 ),
-                                width=300,  # Reduced width for controls
+                                width=300,
                                 bgcolor="#000000",
                                 padding=20,
                                 border_radius=10,
@@ -502,9 +685,12 @@ def basic_operations_page(page: Page):
         expand=True,  # Make container take full width
     )
 
-    return View(
-        controls=[main_content],
+    view = View(
+        "/basic-ops",  # Tambahkan route
+        [main_content],
         padding=0,
-        bgcolor="#1a1a1a",
+        bgcolor="#1a1a1a", 
         scroll=ScrollMode.AUTO,
     )
+    page.views.append(view)
+    page.update()
