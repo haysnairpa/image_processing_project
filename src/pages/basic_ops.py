@@ -38,7 +38,7 @@ import scipy.signal
 
 def basic_operations_page(page: Page, on_back=None):
     page.title = "Photo Editor"
-    page.bgcolor = "#1a1a1a"
+    page.bgcolor = "#ffffff"
     page.padding = 0
     uploaded_image = None  # Original image
     processed_image = None  # Processed image (stateful)
@@ -49,6 +49,10 @@ def basic_operations_page(page: Page, on_back=None):
     crop_start_y = 0
     crop_end_x = 0
     crop_end_y = 0
+
+    # Definisi semua UI components di awal
+    image_display = Image(width=400, height=600, fit="contain")
+    image_title = Text("No image uploaded", size=16, weight="bold", color="#2c3e50")
 
     # Definisi fungsi upload terlebih dahulu
     def upload_image(e: FilePickerResultEvent):
@@ -71,14 +75,45 @@ def basic_operations_page(page: Page, on_back=None):
                     image_title.value = f"Error saving image: {str(e)}"
                     image_title.update()
 
-    # Kemudian inisialisasi FilePicker
+    # Kemudian definisi FilePicker
     file_picker = FilePicker(on_result=upload_image)
     page.overlay.append(file_picker)
 
-    save_file_dialog = FilePicker(
-        on_result=handle_save_result
-    )
+    save_file_dialog = FilePicker(on_result=handle_save_result)
     page.overlay.append(save_file_dialog)
+
+    # Definisi semua slider
+    red_slider = Slider(min=0, max=255, value=0, label="Red")
+    green_slider = Slider(min=0, max=255, value=0, label="Green")
+    blue_slider = Slider(min=0, max=255, value=0, label="Blue")
+    scale_slider = Slider(min=0.1, max=2.0, value=1.0, label="Scale")
+
+    # Definisi semua dropdown dan checkbox
+    maintain_aspect = Checkbox(label="Maintain Aspect Ratio", value=True)
+    filter_dropdown = Dropdown(
+        width=150,
+        options=[
+            dropdown.Option("Sepia"),
+            dropdown.Option("Cyanotype"),
+        ],
+        value="Sepia"
+    )
+    flip_dropdown = Dropdown(
+        width=150,
+        options=[
+            dropdown.Option("Horizontal"),
+            dropdown.Option("Vertical"),
+            dropdown.Option("Diagonal"),
+        ],
+        value="Horizontal"
+    )
+
+    # Definisi text fields
+    translation_x = TextField(value="0", label="X", width=100)
+    translation_y = TextField(value="0", label="Y", width=100)
+    rotation_angle = TextField(value="0", label="Angle", width=100)
+    border_thickness = TextField(value="5", label="Thickness", width=100)
+    border_color = TextField(value="#000000", label="Color", width=100)
 
     # Definisikan semua fungsi processing di sini, sebelum UI components
     def apply_fourier_transform(e):
@@ -352,18 +387,47 @@ def basic_operations_page(page: Page, on_back=None):
     def apply_brightness(e):
         nonlocal processed_image
         if processed_image:
-            enhancer = ImageEnhance.Brightness(processed_image)
-            processed_image = enhancer.enhance(brightness_slider.value)
-            show_image(processed_image, f"Brightness {brightness_slider.value}")
+            try:
+                # Convert PIL Image to numpy array
+                img_array = np.array(processed_image)
+                
+                # Apply brightness adjustment
+                brightness_factor = float(brightness_slider.value)
+                adjusted = img_array * brightness_factor
+                
+                # Clip values to valid range
+                adjusted = np.clip(adjusted, 0, 255).astype(np.uint8)
+                
+                # Convert back to PIL Image
+                processed_image = PILImage.fromarray(adjusted)
+                show_image(processed_image, f"Brightness adjusted to {brightness_slider.value}")
+            except Exception as e:
+                print(f"Error in brightness adjustment: {str(e)}")
 
     # Contrast
     def apply_contrast(e):
         nonlocal processed_image
         if processed_image:
-            enhancer = ImageEnhance.Contrast(processed_image)
-            processed_image = enhancer.enhance(contrast_slider.value)
-            show_image(processed_image, f"Contrast {contrast_slider.value}")
-    
+            try:
+                # Convert PIL Image to numpy array
+                img_array = np.array(processed_image)
+                
+                # Calculate the mean of the image
+                mean = np.mean(img_array)
+                
+                # Apply contrast adjustment
+                contrast_factor = float(contrast_slider.value)
+                adjusted = (img_array - mean) * contrast_factor + mean
+                
+                # Clip values to valid range
+                adjusted = np.clip(adjusted, 0, 255).astype(np.uint8)
+                
+                # Convert back to PIL Image
+                processed_image = PILImage.fromarray(adjusted)
+                show_image(processed_image, f"Contrast adjusted to {contrast_slider.value}")
+            except Exception as e:
+                print(f"Error in contrast adjustment: {str(e)}")
+
     # Filtering
     def apply_color_filter(e):
         nonlocal processed_image
@@ -427,34 +491,94 @@ def basic_operations_page(page: Page, on_back=None):
             processed_image = PILImage.fromarray(np.uint8(result))
             show_image(processed_image, "Wiener Filter Applied")
 
-    # Kemudian definisikan UI components
-    filtering_controls = Column(
+    def apply_morphological_operation(e, operation_type):
+        nonlocal processed_image
+        if processed_image:
+            # Convert PIL Image to numpy array
+            img_array = np.array(processed_image)
+            
+            # Apply morphological operation
+            kernel = np.ones((5, 5), np.uint8)
+            if operation_type == "dilation":
+                result = cv2.dilate(img_array, kernel, iterations=1)
+            elif operation_type == "erosion":
+                result = cv2.erode(img_array, kernel, iterations=1)
+            elif operation_type == "opening":
+                result = cv2.morphologyEx(img_array, cv2.MORPH_OPEN, kernel)
+            elif operation_type == "closing":
+                result = cv2.morphologyEx(img_array, cv2.MORPH_CLOSE, kernel)
+            
+            # Convert back to PIL Image
+            processed_image = PILImage.fromarray(result)
+            show_image(processed_image, f"{operation_type.title()} Applied")
+
+    brightness_slider = Slider(
+        min=0.1,
+        max=3.0,  # Increased range for better visibility
+        value=1.0,
+        label="Brightness",
+        on_change=apply_brightness  # Add direct binding
+    )
+    contrast_slider = Slider(
+        min=0.1,
+        max=3.0,  # Increased range for better visibility
+        value=1.0,
+        label="Contrast",
+        on_change=apply_contrast  # Add direct binding
+    )
+
+    # Define enhancement controls
+    enhancement_controls = Column(
         [
-            Text("Filtering & Edge Detection", size=14, weight="bold"),
+            Text("Enhancement", size=14, weight="bold", color="#2c3e50"),
             Row(
                 [
-                    ElevatedButton("Fourier Transform", on_click=apply_fourier_transform),
+                    Column([
+                        brightness_slider,
+                        contrast_slider,
+                    ], expand=True),
+                    Column([
+                        ElevatedButton("Apply Brightness", on_click=apply_brightness),
+                        ElevatedButton("Apply Contrast", on_click=apply_contrast),
+                    ])
+                ]
+            ),
+        ]
+    )
+
+    # Define filtering controls 
+    filtering_controls = Column(
+        [
+            Text("Filtering", size=14, weight="bold", color="#2c3e50"),
+            Row(
+                [
+                    filter_dropdown,
+                    ElevatedButton("Apply Filter", on_click=apply_color_filter),
+                ]
+            ),
+            Row(
+                [
                     ElevatedButton("Mean Filter", on_click=apply_mean_filter),
                     ElevatedButton("Gaussian Filter", on_click=apply_gaussian_filter),
                     ElevatedButton("Median Filter", on_click=apply_median_filter),
-                    ElevatedButton("Wiener Filter", on_click=apply_wiener_filter),
                 ],
                 wrap=True
             ),
             Row(
                 [
-                    ElevatedButton("Sobel Edge", on_click=apply_sobel_filter),
+                    ElevatedButton("Sobel Filter", on_click=apply_sobel_filter),
                     ElevatedButton("Canny Edge", on_click=apply_canny_filter),
                     ElevatedButton("Laplacian", on_click=apply_laplacian_filter),
                 ],
                 wrap=True
             ),
-        ]
-    )
-
-    enhancement_controls = Column(
-        [
-            Text("Enhancement", size=14, weight="bold"),
+            Row(
+                [
+                    ElevatedButton("Fourier Transform", on_click=apply_fourier_transform),
+                    ElevatedButton("Wiener Filter", on_click=apply_wiener_filter),
+                ],
+                wrap=True
+            ),
             Row(
                 [
                     ElevatedButton("Histogram Equalization", on_click=apply_histogram_equalization),
@@ -462,17 +586,41 @@ def basic_operations_page(page: Page, on_back=None):
                 ],
                 wrap=True
             ),
+            # Tambahkan morphological operations
+            Text("Morphological Operations", size=14, weight="bold", color="#2c3e50"),
+            Row(
+                [
+                    ElevatedButton("Dilation", on_click=lambda e: apply_morphological_operation(e, "dilation")),
+                    ElevatedButton("Erosion", on_click=lambda e: apply_morphological_operation(e, "erosion")),
+                    ElevatedButton("Opening", on_click=lambda e: apply_morphological_operation(e, "opening")),
+                    ElevatedButton("Closing", on_click=lambda e: apply_morphological_operation(e, "closing")),
+                ],
+                wrap=True
+            ),
         ]
     )
 
-    # UI Components
-    file_picker = FilePicker(on_result=upload_image)
-    page.overlay.append(file_picker)
-
-    # Define all UI components first
+    # Kemudian definisikan UI components
     red_slider = Slider(min=0, max=255, value=0, label="Red")
     green_slider = Slider(min=0, max=255, value=0, label="Green")
     blue_slider = Slider(min=0, max=255, value=0, label="Blue")
+    
+    # Tambahkan definisi brightness dan contrast slider
+    brightness_slider = Slider(
+        min=0.1,
+        max=3.0,  # Increased range for better visibility
+        value=1.0,
+        label="Brightness",
+        on_change=apply_brightness  # Add direct binding
+    )
+    
+    contrast_slider = Slider(
+        min=0.1,
+        max=3.0,  # Increased range for better visibility
+        value=1.0,
+        label="Contrast",
+        on_change=apply_contrast  # Add direct binding
+    )
     
     scale_slider = Slider(
         min=0.1,
@@ -480,25 +628,11 @@ def basic_operations_page(page: Page, on_back=None):
         value=1.0,
         label="Scale",
     )
+    
+    # Definisi dropdown dan komponen lainnya
     maintain_aspect = Checkbox(
         label="Maintain Aspect Ratio",
         value=True,
-    )
-    translation_x = TextField(value="0", label="X", width=100)
-    translation_y = TextField(value="0", label="Y", width=100)
-    rotation_angle = TextField(value="0", label="Angle", width=100)
-    
-    brightness_slider = Slider(min=0.1, max=2.0, value=1.0, label="Brightness")
-    contrast_slider = Slider(min=0.1, max=2.0, value=1.0, label="Contrast")
-    
-    flip_dropdown = Dropdown(
-        width=150,
-        options=[
-            dropdown.Option("Horizontal"),
-            dropdown.Option("Vertical"),
-            dropdown.Option("Diagonal"),
-        ],
-        value="Horizontal"
     )
     
     filter_dropdown = Dropdown(
@@ -510,16 +644,30 @@ def basic_operations_page(page: Page, on_back=None):
         value="Sepia"
     )
     
+    translation_x = TextField(value="0", label="X", width=100)
+    translation_y = TextField(value="0", label="Y", width=100)
+    rotation_angle = TextField(value="0", label="Angle", width=100)
+    
+    flip_dropdown = Dropdown(
+        width=150,
+        options=[
+            dropdown.Option("Horizontal"),
+            dropdown.Option("Vertical"),
+            dropdown.Option("Diagonal"),
+        ],
+        value="Horizontal"
+    )
+    
     border_thickness = TextField(value="5", label="Thickness", width=100)
     border_color = TextField(value="#000000", label="Color", width=100)
 
     image_display = Image(width=400, height=600, fit="contain")
-    image_title = Text("No image uploaded", size=16, weight="bold")
+    image_title = Text("No image uploaded", size=16, weight="bold", color="#2c3e50")
 
     # Define basic controls first
     basic_controls = Column(
         [
-            Text("Basic Controls", size=14, weight="bold"),
+            Text("Basic Controls", size=14, weight="bold", color="#2c3e50"),
             Row(
                 [
                     ElevatedButton("Upload Image", on_click=lambda _: file_picker.pick_files(allow_multiple=False)),
@@ -547,7 +695,7 @@ def basic_operations_page(page: Page, on_back=None):
     # Define control groups
     transform_controls = Column(
         [
-            Text("Image Transformations", size=14, weight="bold"),
+            Text("Image Transformations", size=14, weight="bold", color="#2c3e50"),
             Row(
                 [
                     ElevatedButton("Grayscale", on_click=apply_grayscale),
@@ -562,7 +710,7 @@ def basic_operations_page(page: Page, on_back=None):
 
     color_controls = Column(
         [
-            Text("Color Adjustments", size=14, weight="bold"),
+            Text("Color Adjustments", size=14, weight="bold", color="#2c3e50"),
             Row(
                 [
                     Column([
@@ -578,7 +726,7 @@ def basic_operations_page(page: Page, on_back=None):
 
     geometry_controls = Column(
         [
-            Text("Geometry", size=14, weight="bold"),
+            Text("Geometry", size=14, weight="bold", color="#2c3e50"),
             Row(
                 [
                     Column([
@@ -623,6 +771,22 @@ def basic_operations_page(page: Page, on_back=None):
         mouse_cursor=MouseCursor.MOVE,
     )
 
+    # Tambahkan border controls setelah filter_controls
+    border_controls = Column(
+        [
+            Text("Border", size=14, weight="bold", color="#2c3e50"),
+            Row(
+                [
+                    Column([
+                        border_thickness,
+                        border_color,
+                    ], expand=True),
+                    ElevatedButton("Apply Border", on_click=apply_border),
+                ]
+            ),
+        ]
+    )
+
     # Then create main layout
     main_content = Container(
         content=Column(
@@ -632,8 +796,8 @@ def basic_operations_page(page: Page, on_back=None):
                         [
                             IconButton(
                                 icon=Icons.ARROW_BACK,
-                                icon_color="white",
-                                on_click=lambda _: page.go("/"),
+                                icon_color="black",
+                                on_click=lambda e: on_back(e),
                                 tooltip="Back to Home",
                             ),
                             image_title,
@@ -654,23 +818,24 @@ def basic_operations_page(page: Page, on_back=None):
                                         color_controls,
                                         enhancement_controls,
                                         filtering_controls,
+                                        border_controls,
                                     ],
                                     spacing=20,
                                     scroll=ScrollMode.ALWAYS,
                                     height=600,
                                 ),
                                 width=300,
-                                bgcolor="#000000",
+                                bgcolor="#1a1a1a",
                                 padding=20,
                                 border_radius=10,
                                 margin=10,
                             ),
                             Container(  # Image container - right
                                 content=crop_gesture,
-                                expand=True,  # Take remaining space
+                                expand=True,
                                 height=600,
                                 margin=10,
-                                alignment=alignment.center,  # Center the image
+                                alignment=alignment.center,
                             ),
                         ],
                         spacing=0,
@@ -682,15 +847,7 @@ def basic_operations_page(page: Page, on_back=None):
             spacing=0,
             horizontal_alignment="center",
         ),
-        expand=True,  # Make container take full width
+        expand=True,
     )
-
-    view = View(
-        "/basic-ops",  # Tambahkan route
-        [main_content],
-        padding=0,
-        bgcolor="#1a1a1a", 
-        scroll=ScrollMode.AUTO,
-    )
-    page.views.append(view)
-    page.update()
+    
+    return main_content

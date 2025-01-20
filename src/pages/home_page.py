@@ -65,9 +65,11 @@ class HomePage(UserControl):
         )
     
     def navigate_to_photos_editor(self, e):
-        self.page.go("/basic-ops")
+        self.page.clean()
         page = basic_operations_page(
-            self.page)
+            self.page,
+            lambda e: self.show_home()
+        )
         self.page.add(page)
     
     def navigate_to_photos_stitch(self, e):
