@@ -127,8 +127,26 @@ class BackgroundRemovalPage(UserControl):
             else:  # KMeans
                 result_array = remove_background_kmeans(self.selected_image.src)
 
-            # Convert the result array back to an image
+            # Convert the result array back to an image (assuming it's in RGB)
             result_img = Image.fromarray(result_array.astype('uint8'))
+
+            # Convert image to RGBA to add transparency (alpha channel)
+            result_img = result_img.convert("RGBA")
+            result_array = np.array(result_img)
+
+            # Create a mask where white pixels are found (or almost white)
+            # Threshold values can be adjusted for specific use cases
+            lower_white = np.array([200, 200, 200, 255])  # White pixel threshold
+            upper_white = np.array([255, 255, 255, 255])
+
+            # Create a mask to find white pixels
+            white_mask = np.all((result_array[:, :, :3] >= lower_white[:3]) & (result_array[:, :, :3] <= upper_white[:3]), axis=-1)
+
+            # Set the alpha channel to 0 (transparent) for white pixels
+            result_array[white_mask] = [0, 0, 0, 0]  # Black with full transparency
+
+            # Convert the numpy array back to an image
+            result_img = Image.fromarray(result_array)
 
             # Save the image to an in-memory buffer
             self.result_image = io.BytesIO()
@@ -137,7 +155,7 @@ class BackgroundRemovalPage(UserControl):
 
             # Update the result image
             result = ft.Image(
-                src_base64 = base64.b64encode(self.result_image.getvalue()).decode("utf-8"),
+                src_base64=base64.b64encode(self.result_image.getvalue()).decode("utf-8"),
                 width=300,
                 height=300,
                 fit=ft.ImageFit.CONTAIN,
@@ -145,6 +163,7 @@ class BackgroundRemovalPage(UserControl):
             self.result_container.content = result
             self.download_button.disabled = False
             self.update()
+
 
     def download_result(self, e):
         if self.result_image:
