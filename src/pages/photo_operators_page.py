@@ -15,13 +15,11 @@ from flet import (
     dropdown,
     Stack,
     Slider,
-    TextField,
     alignment,
     border_radius,
     padding,
     margin,
     colors,
-    FilePickerResultEvent
 )
 
 import numpy as np
@@ -46,6 +44,9 @@ class PhotoOperatorsPage(UserControl):
         self.beta_slider = None
         self.gamma_input = None
         self.blend_params_container = None
+        self.background_label = None
+        self.overlay_label = None
+        self.overlay_alpha = None
 
     def add_image(self, index):
         def on_result(e: ft.FilePickerResultEvent):
@@ -119,8 +120,22 @@ class PhotoOperatorsPage(UserControl):
     def on_operator_change(self, e):
         if e.data == "Blend":
             self.blend_params_container.visible = True
+            self.background_label.visible = False
+            self.overlay_label.visible = False
+            self.overlay_alpha.visible = False
+
+        elif e.data == "Overlay":
+            self.background_label.visible = True
+            self.overlay_label.visible = True
+            self.blend_params_container.visible = False
+            self.overlay_alpha.visible = True
+
         else:
             self.blend_params_container.visible = False
+            self.blend_params_container.visible = False
+            self.background_label.visible = False
+            self.overlay_label.visible = False
+            self.overlay_alpha.visible = False
         self.update()
 
     def apply_operator(self, e):
@@ -151,7 +166,7 @@ class PhotoOperatorsPage(UserControl):
                 gamma = float(self.gamma_input.value)
                 result_array = blend_images(img1, img2, alpha, beta, gamma)
             elif operator == "Overlay":
-                result_array = overlay_images(img1, img2)
+                result_array = overlay_images(img1, img2, self.overlay_alpha.value)
             else:
                 return
 
@@ -280,12 +295,12 @@ class PhotoOperatorsPage(UserControl):
             width=200,
         )
 
-        self.gamma_input = TextField(
-            label="Gamma",
-            value="0",
-            width=100,
-            text_align=ft.TextAlign.RIGHT,
-            keyboard_type=ft.KeyboardType.NUMBER,
+        self.gamma_input = Slider(
+            min=0,
+            max=1,
+            value=0.5,
+            label="Gamma: {value}",
+            width=200,
         )
 
         # Container for blend parameters
@@ -308,6 +323,34 @@ class PhotoOperatorsPage(UserControl):
                 spacing=10,
             ),
             visible=False,
+        )
+
+        self.background_label = Container(
+            content=Text("Background", color=colors.BLACK, weight="bold"),
+            border_radius=border_radius.all(5),
+            padding=padding.all(5),
+            alignment=alignment.center,
+            margin=margin.only(bottom=10),
+            visible=False
+        )
+
+        self.overlay_label = Container(
+            content=Text("Overlay", color=colors.BLACK, weight="bold"),
+            border_radius=border_radius.all(5),
+            padding=padding.all(5),
+            alignment=alignment.center,
+            margin=margin.only(top=10),
+            visible=False
+        )
+
+        # Blend parameters
+        self.overlay_alpha = Slider(
+            min=0,
+            max=1,
+            value=0.5,
+            label="Alpha: {value}",
+            width=200,
+            visible=False
         )
 
         # Apply operator button
@@ -342,10 +385,18 @@ class PhotoOperatorsPage(UserControl):
         # Input images section
         input_images = Column(
             controls=[
-                self.image_containers[0],
-                self.image_containers[1],
+                self.background_label,
+                Column(
+                    controls=[
+                        self.image_containers[0],
+                        self.image_containers[1],
+                    ],
+                    spacing=20,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                self.overlay_label
             ],
-            spacing=20,
+            spacing=5,
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         )
 
@@ -358,9 +409,10 @@ class PhotoOperatorsPage(UserControl):
                     spacing=10,
                 ),
                 self.blend_params_container,
+                self.overlay_alpha,
                 apply_button,
             ],
-            spacing=10,
+            spacing=20,
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         )
 
@@ -385,7 +437,7 @@ class PhotoOperatorsPage(UserControl):
                 operation_section,
                 output_section,
             ],
-            spacing=40,
+            spacing=30,
             alignment=ft.MainAxisAlignment.SPACE_EVENLY,
         )
 
