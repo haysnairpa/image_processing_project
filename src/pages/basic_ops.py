@@ -1,853 +1,603 @@
-from flet import (
-    ElevatedButton,
-    View,
-    Text,
-    FilePicker,
-    FilePickerResultEvent,
-    Column,
-    Row,
-    Image,
-    Slider,
-    TextField,
-    Page,
-    Dropdown,
-    Checkbox,
-    dropdown,
-    ScrollMode,
-    Container,
-    IconButton,
-    Icons,
-    Stack,
-    FloatingActionButtonLocation,
-    animation,
-    transform,
-    GestureDetector,
-    MouseCursor,
-    border,
-    alignment,
-)
-from PIL import Image as PILImage, ImageOps, ImageEnhance, ImageDraw
-import io
 import base64
-import cv2
-import numpy as np
+import flet as ft
+from PIL import Image
+import io
 import os
-import time
-import scipy.signal
+from libs.basic_operations import *
 
+class PhotoEditorPage(ft.UserControl):
+    def __init__(self, page: ft.Page, on_back):
+        super().__init__()
+        self.page = page
+        self.on_back = on_back
+        self.uploaded_image = None
+        self.processed_image = None
+        self.init_controls()
 
-def basic_operations_page(page: Page, on_back=None):
-    page.title = "Photo Editor"
-    page.bgcolor = "#ffffff"
-    page.padding = 0
-    uploaded_image = None  # Original image
-    processed_image = None  # Processed image (stateful)
+    def init_controls(self):
+        # Initialize sliders
+        self.red_slider = ft.Slider(min=0, max=255, value=0, label="Red")
+        self.green_slider = ft.Slider(min=0, max=255, value=0, label="Green")
+        self.blue_slider = ft.Slider(min=0, max=255, value=0, label="Blue")
+        self.brightness_slider = ft.Slider(min=0.1, max=3.0, value=1.0, label="Brightness")
+        self.contrast_slider = ft.Slider(min=0.1, max=3.0, value=1.0, label="Contrast")
+        
+        # Initialize dropdowns
+        self.flip_dropdown = ft.Dropdown(
+            width=300,
+            options=[
+                ft.dropdown.Option("Horizontal"),
+                ft.dropdown.Option("Vertical"),
+                ft.dropdown.Option("Diagonal"),
+            ],
+            value="Horizontal"
+        )
+        
+        self.filter_dropdown = ft.Dropdown(
+            width=300,
+            options=[
+                ft.dropdown.Option("Sepia"),
+                ft.dropdown.Option("Cyanotype"),
+            ],
+            value="Sepia"
+        )
+        
+        # Initialize text fields
+        self.rotation_angle = ft.TextField(value="0", label="Angle", width=300)
+        self.gamma = ft.TextField(value="1", label="Gamma", width=300)
+        self.new_width = ft.TextField(value="0", label="New Width", width=145)
+        self.new_height = ft.TextField(value="0", label="New Heigth", width=145)
+        self.maintain_aspect = None # use toogle button to implement this
+        self.translate_x = ft.TextField(value="0", label="X", width=145)
+        self.translate_y = ft.TextField(value="0", label="Y", width=145)
+        self.border_thickness = ft.TextField(value="5", label="Thickness")
+        self.border_color = ft.TextField(value="Black", label="Color")
+        
+        # Initialize file picker
+        self.file_picker = ft.FilePicker(
+            on_result=self.handle_file_picked
+        )
+        self.page.overlay.append(self.file_picker)
+        
+        self.save_file_dialog = ft.FilePicker(
+            on_result=self.handle_save_result
+        )
+        self.page.overlay.append(self.save_file_dialog)
 
-    # State variables for cropping
-    is_cropping = False
-    crop_start_x = 0
-    crop_start_y = 0
-    crop_end_x = 0
-    crop_end_y = 0
+    def pil_to_ft_image(self, pil_image, width=None, height=None):
+        # Convert PIL image to flet Image
+        img_byte_arr = io.BytesIO()
+        pil_image.save(img_byte_arr, format='PNG')
+        img_byte_arr = img_byte_arr.getvalue()
+        
+        return ft.Stack(
+            controls=[
+                    ft.Image(
+                        src_base64=base64.b64encode(img_byte_arr).decode(),
+                        width=width,
+                        height=height,
+                        fit=ft.ImageFit.CONTAIN,
+                    ),
+                    ft.IconButton(
+                        icon=ft.icons.CLOSE,
+                        icon_color=ft.colors.WHITE,
+                        bgcolor=ft.colors.BLACK54,
+                        on_click=lambda _: self.reset_input(),
+                    ),
+                ],
+        )
 
-    # Definisi semua UI components di awal
-    image_display = Image(width=400, height=600, fit="contain")
-    image_title = Text("No image uploaded", size=16, weight="bold", color="#2c3e50")
-
-    # Definisi fungsi upload terlebih dahulu
-    def upload_image(e: FilePickerResultEvent):
-        nonlocal uploaded_image, processed_image
+    def handle_file_picked(self, e: ft.FilePickerResultEvent):
         if e.files:
             file_path = e.files[0].path
-            uploaded_image = PILImage.open(file_path)
-            processed_image = uploaded_image.copy()  # Initialize processed image
-            show_image(processed_image, "Uploaded Image")
+            self.uploaded_image = Image.open(file_path)
+            self.processed_image = self.uploaded_image.copy()
+            self.update_images()
 
-    def handle_save_result(e: FilePickerResultEvent):
-        if e.path:
+    def handle_save_result(self, e: ft.FilePickerResultEvent):
+        if e.path and self.processed_image:
             try:
-                processed_image.save(e.path)
-                image_title.value = f"Image saved to: {e.path}"
-                image_title.update()
+                self.processed_image.save(e.path)
             except Exception as e:
                 print(f"Error saving image: {str(e)}")
-                if image_title:
-                    image_title.value = f"Error saving image: {str(e)}"
-                    image_title.update()
 
-    # Kemudian definisi FilePicker
-    file_picker = FilePicker(on_result=upload_image)
-    page.overlay.append(file_picker)
+    def update_images(self):
+        if self.processed_image:
+            self.output_image.controls[0].content = self.pil_to_ft_image(self.processed_image, 600, 600)
+        self.update()
 
-    save_file_dialog = FilePicker(on_result=handle_save_result)
-    page.overlay.append(save_file_dialog)
+    # Image processing methods
+    def apply_grayscale(self, _):
+        if self.processed_image:
+            self.processed_image = apply_grayscale(self.processed_image)
+            self.update_images()
 
-    # Definisi semua slider
-    red_slider = Slider(min=0, max=255, value=0, label="Red")
-    green_slider = Slider(min=0, max=255, value=0, label="Green")
-    blue_slider = Slider(min=0, max=255, value=0, label="Blue")
-    scale_slider = Slider(min=0.1, max=2.0, value=1.0, label="Scale")
+    def apply_negative(self, _):
+        if self.processed_image:
+            self.processed_image = apply_negative(self.processed_image)
+            self.update_images()
 
-    # Definisi semua dropdown dan checkbox
-    maintain_aspect = Checkbox(label="Maintain Aspect Ratio", value=True)
-    filter_dropdown = Dropdown(
-        width=150,
-        options=[
-            dropdown.Option("Sepia"),
-            dropdown.Option("Cyanotype"),
-        ],
-        value="Sepia"
-    )
-    flip_dropdown = Dropdown(
-        width=150,
-        options=[
-            dropdown.Option("Horizontal"),
-            dropdown.Option("Vertical"),
-            dropdown.Option("Diagonal"),
-        ],
-        value="Horizontal"
-    )
+    def apply_color_manipulation(self, _):
+        if self.processed_image:
+            r = int(self.red_slider.value)
+            g = int(self.green_slider.value)
+            b = int(self.blue_slider.value)
+            self.processed_image = apply_color_manipulation(self.processed_image, r, g, b)
+            self.update_images()
 
-    # Definisi text fields
-    translation_x = TextField(value="0", label="X", width=100)
-    translation_y = TextField(value="0", label="Y", width=100)
-    rotation_angle = TextField(value="0", label="Angle", width=100)
-    border_thickness = TextField(value="5", label="Thickness", width=100)
-    border_color = TextField(value="#000000", label="Color", width=100)
+    def apply_flip(self, _):
+        if self.processed_image:
+            self.processed_image = apply_flip(self.processed_image, self.flip_dropdown.value)
+            self.update_images()
 
-    # Definisikan semua fungsi processing di sini, sebelum UI components
-    def apply_fourier_transform(e):
-        nonlocal processed_image
-        if processed_image:
-            img_array = np.array(processed_image.convert('L'))
-            f_transform = np.fft.fft2(img_array)
-            f_shift = np.fft.fftshift(f_transform)
-            magnitude_spectrum = 20 * np.log(np.abs(f_shift))
-            processed_image = PILImage.fromarray(np.uint8(magnitude_spectrum))
-            show_image(processed_image, "Fourier Transform Applied")
+    def apply_scale(self, _):
+        if self.processed_image:
+            self.processed_image = apply_scaling(self.processed_image, int(self.new_width.value), int(self.new_height.value))
+            self.update_images()
 
-    def apply_mean_filter(e):
-        nonlocal processed_image
-        if processed_image:
-            img_array = np.array(processed_image)
-            kernel = np.ones((5,5), np.float32)/25
-            filtered = cv2.filter2D(img_array, -1, kernel)
-            processed_image = PILImage.fromarray(filtered)
-            show_image(processed_image, "Mean Filter Applied")
+    def apply_translate(self, _):
+        if self.processed_image:
+            self.processed_image = apply_translation(self.processed_image, int(self.translate_x.value), int(self.translate_y.value))
+            self.update_images()
 
-    def apply_gaussian_filter(e):
-        nonlocal processed_image
-        if processed_image:
-            img_array = np.array(processed_image)
-            filtered = cv2.GaussianBlur(img_array, (5,5), 0)
-            processed_image = PILImage.fromarray(filtered)
-            show_image(processed_image, "Gaussian Filter Applied")
+    def apply_rotation(self, _):
+        if self.processed_image:
+            angle = float(self.rotation_angle.value)
+            self.processed_image = apply_rotation(self.processed_image, angle)
+            self.update_images()
 
-    def apply_median_filter(e):
-        nonlocal processed_image
-        if processed_image:
-            img_array = np.array(processed_image)
-            filtered = cv2.medianBlur(img_array, 3)
-            processed_image = PILImage.fromarray(filtered)
-            show_image(processed_image, "Median Filter Applied")
+    def apply_brightness(self, _):
+        if self.processed_image:
+            factor = float(self.brightness_slider.value)
+            self.processed_image = apply_brightness(self.processed_image, factor)
+            self.update_images()
 
-    def apply_sobel_filter(e):
-        nonlocal processed_image
-        if processed_image:
-            img_array = np.array(processed_image.convert('L'))
-            sobelx = cv2.Sobel(img_array, cv2.CV_64F, 1, 0, ksize=3)
-            sobely = cv2.Sobel(img_array, cv2.CV_64F, 0, 1, ksize=3)
-            magnitude = np.sqrt(sobelx**2 + sobely**2)
-            processed_image = PILImage.fromarray(np.uint8(magnitude))
-            show_image(processed_image, "Sobel Filter Applied")
+    def apply_contrast(self, _):
+        if self.processed_image:
+            factor = float(self.contrast_slider.value)
+            self.processed_image = apply_contrast(self.processed_image, factor)
+            self.update_images()
 
-    def apply_canny_filter(e):
-        nonlocal processed_image
-        if processed_image:
-            img_array = np.array(processed_image.convert('L'))
-            edges = cv2.Canny(img_array, 100, 200)
-            processed_image = PILImage.fromarray(edges)
-            show_image(processed_image, "Canny Edge Detection Applied")
+    def apply_he(self, _):
+        if self.processed_image:
+            self.processed_image = apply_histogram_equalization(self.processed_image)
+            self.update_images()
 
-    def apply_laplacian_filter(e):
-        nonlocal processed_image
-        if processed_image:
-            img_array = np.array(processed_image.convert('L'))
-            laplacian = cv2.Laplacian(img_array, cv2.CV_64F)
-            processed_image = PILImage.fromarray(np.uint8(np.absolute(laplacian)))
-            show_image(processed_image, "Laplacian Filter Applied")
+    def apply_cs(self, _):
+        if self.processed_image:
+            self.processed_image = apply_contrast_stretching(self.processed_image)
+            self.update_images()
 
-    def apply_histogram_equalization(e):
-        nonlocal processed_image
-        if processed_image:
-            img_array = np.array(processed_image)
-            if len(img_array.shape) == 3:
-                img_yuv = cv2.cvtColor(img_array, cv2.COLOR_RGB2YUV)
-                img_yuv[:,:,0] = cv2.equalizeHist(img_yuv[:,:,0])
-                result = cv2.cvtColor(img_yuv, cv2.COLOR_YUV2RGB)
-            else:
-                result = cv2.equalizeHist(img_array)
-            processed_image = PILImage.fromarray(result)
-            show_image(processed_image, "Histogram Equalization Applied")
+    def apply_gc(self, _):
+        if self.processed_image:
+            gamma = float(self.gamma.value)
+            self.processed_image = apply_gamma_correction(self.processed_image, gamma)
+            self.update_images()
 
-    def apply_contrast_stretching(e):
-        nonlocal processed_image
-        if processed_image:
-            img_array = np.array(processed_image)
-            p2, p98 = np.percentile(img_array, (2, 98))
-            result = np.clip(((img_array - p2) / (p98 - p2) * 255), 0, 255).astype(np.uint8)
-            processed_image = PILImage.fromarray(result)
-            show_image(processed_image, "Contrast Stretching Applied")
-
-    def reset_image(e):
-        nonlocal processed_image
-        if uploaded_image:
-            processed_image = uploaded_image.copy()  # Reset to original image
-            show_image(processed_image, "Image Reset")
-
-    def show_image(img, title):
-        try:
-            # Convert RGBA to RGB if needed
-            if img.mode == 'RGBA':
-                img = img.convert('RGB')
-            
-            buf = io.BytesIO()
-            img.save(buf, format="PNG")
-            buf.seek(0)
-            img_base64 = base64.b64encode(buf.getvalue()).decode()
-            
-            # Pastikan image_display dan image_title sudah diinisialisasi
-            if image_display and image_title:
-                image_display.src_base64 = img_base64
-                image_title.value = title
-                
-                # Update hanya komponen yang berubah
-                image_display.update()
-                image_title.update()
-        except Exception as e:
-            print(f"Error showing image: {e}")
-            if image_title:
-                image_title.value = f"Error: {str(e)}"
-                image_title.update()
-
-    # Functionality: Grayscale
-    def apply_grayscale(e):
-        nonlocal processed_image
-        if processed_image:
-            processed_image = ImageOps.grayscale(processed_image)
-            show_image(processed_image, "Grayscale Image")
-
-    # Functionality: Negative Transformation
-    def apply_negative(e):
-        nonlocal processed_image
-        if processed_image:
-            processed_image = ImageOps.invert(processed_image)
-            show_image(processed_image, "Negative Image")
-
-    # Functionality: Color Manipulation
-    def apply_color_manipulation(e):
-        nonlocal processed_image
-        if processed_image:
-            r, g, b = int(red_slider.value), int(green_slider.value), int(blue_slider.value)
-            pixels = processed_image.load()
-            for x in range(processed_image.width):
-                for y in range(processed_image.height):
-                    pr, pg, pb = pixels[x, y]
-                    pixels[x, y] = (
-                        min(pr + r, 255),
-                        min(pg + g, 255),
-                        min(pb + b, 255),
-                    )
-            show_image(processed_image, "Color Manipulation")
-
-    # Functionality: Cropping
-    def start_crop(e):
-        nonlocal is_cropping, crop_start_x, crop_start_y
-        is_cropping = True
-        crop_start_x = e.local_x
-        crop_start_y = e.local_y
-        crop_overlay.visible = True
-        crop_overlay.left = crop_start_x
-        crop_overlay.top = crop_start_y
-        crop_overlay.update()  # Update hanya overlay
-
-    def update_crop(e):
-        nonlocal crop_end_x, crop_end_y
-        if is_cropping:
-            crop_end_x = e.local_x
-            crop_end_y = e.local_y
-            
-            # Update overlay position and size
-            crop_overlay.width = abs(crop_end_x - crop_start_x)
-            crop_overlay.height = abs(crop_end_y - crop_start_y)
-            crop_overlay.left = min(crop_start_x, crop_end_x)
-            crop_overlay.top = min(crop_start_y, crop_end_y)
-            crop_overlay.update()  # Update hanya overlay
-
-    def end_crop(e):
-        nonlocal is_cropping, processed_image
-        if is_cropping and processed_image:
-            is_cropping = False
-            crop_overlay.visible = False
-            
-            # Convert coordinates
-            scale_x = processed_image.width / image_display.width
-            scale_y = processed_image.height / image_display.height
-            
-            x1 = int(min(crop_start_x, crop_end_x) * scale_x)
-            y1 = int(min(crop_start_y, crop_end_y) * scale_y)
-            x2 = int(max(crop_start_x, crop_end_x) * scale_x)
-            y2 = int(max(crop_start_y, crop_end_y) * scale_y)
-            
-            # Crop image
-            try:
-                cropped = processed_image.crop((x1, y1, x2, y2))
-                processed_image = cropped
-                show_image(processed_image, "Cropped Image")
-            except Exception as e:
-                print(f"Error cropping: {str(e)}")
-                if image_title:
-                    image_title.value = f"Error cropping image: {str(e)}"
-                    image_title.update()
-
-    # Functionality: Scaling
-    def apply_scaling(e):
-        nonlocal processed_image
-        if processed_image:
-            try:
-                scale = float(scale_slider.value)
-                
-                # Get original dimensions
-                orig_width = processed_image.width
-                orig_height = processed_image.height
-                
-                # Calculate new dimensions
-                if maintain_aspect.value:
-                    new_width = int(orig_width * scale)
-                    new_height = int(orig_height * scale)
-                else:
-                    new_width = int(orig_width * scale)
-                    new_height = int(orig_height * scale)
-                
-                # Resize image
-                processed_image = processed_image.resize(
-                    (new_width, new_height), 
-                    PILImage.LANCZOS
-                )
-                
-                # Update image display tanpa page.update()
-                show_image(processed_image, f"Scaled: {scale}x")
-                
-            except Exception as e:
-                print(f"Error in scaling: {str(e)}")
-                if image_title:
-                    image_title.value = f"Error scaling image: {str(e)}"
-                    image_title.update()
-
-    # # Functionality: Image Blending
-    # def apply_blending(e):
-    #     nonlocal processed_image
-    #     if processed_image and uploaded_image:
-    #         alpha = blend_slider.value
-    #         processed_image = PILImage.blend(uploaded_image, processed_image, alpha)
-    #         show_image(processed_image, f"Blended with alpha {alpha}")
-
-    # Functionality: Flip
-    def apply_flip(e):
-        nonlocal processed_image
-        if processed_image:
-            if flip_dropdown.value == "Horizontal":
-                processed_image = ImageOps.mirror(processed_image)
-            elif flip_dropdown.value == "Vertical":
-                processed_image = ImageOps.flip(processed_image)
-            elif flip_dropdown.value == "Diagonal":
-                processed_image = ImageOps.mirror(ImageOps.flip(processed_image))
-            show_image(processed_image, f"Flipped {flip_dropdown.value}")
+    def apply_color_filtering(self, _):
+        if self.processed_image:
+            self.processed_image = apply_color_filter(self.processed_image, self.filter_dropdown.value)
+            self.update_images()
     
-    # Functinallity: Translation
-    def apply_translation(e):
-        nonlocal processed_image
-        if processed_image:
-            dx = int(translation_x.value)
-            dy = int(translation_y.value)
-            translated_image = PILImage.new("RGB", (processed_image.width, processed_image.height), (0,0,0))
-            translated_image.paste(processed_image, (dx, dy))
-            processed_image = translated_image
-            show_image(processed_image, f"Translated: ({dx}, {dy})")
+    def apply_gaussian(self, _):
+        if self.processed_image:
+            self.processed_image = apply_gaussian_filter(self.processed_image)
+            self.update_images()
 
-    # Functionallity: Rotation
-    def apply_rotation(e):
-        nonlocal processed_image
-        if processed_image:
-            angle = int(rotation_angle.value)
-            processed_image = processed_image.rotate(angle, expand=True)
-            show_image(processed_image, f"Rotated {angle}")
-    
-    # Brightness
-    def apply_brightness(e):
-        nonlocal processed_image
-        if processed_image:
-            try:
-                # Convert PIL Image to numpy array
-                img_array = np.array(processed_image)
-                
-                # Apply brightness adjustment
-                brightness_factor = float(brightness_slider.value)
-                adjusted = img_array * brightness_factor
-                
-                # Clip values to valid range
-                adjusted = np.clip(adjusted, 0, 255).astype(np.uint8)
-                
-                # Convert back to PIL Image
-                processed_image = PILImage.fromarray(adjusted)
-                show_image(processed_image, f"Brightness adjusted to {brightness_slider.value}")
-            except Exception as e:
-                print(f"Error in brightness adjustment: {str(e)}")
+    def apply_median(self, _):
+        if self.processed_image:
+            self.processed_image = apply_median_filter(self.processed_image)
+            self.update_images()
 
-    # Contrast
-    def apply_contrast(e):
-        nonlocal processed_image
-        if processed_image:
-            try:
-                # Convert PIL Image to numpy array
-                img_array = np.array(processed_image)
-                
-                # Calculate the mean of the image
-                mean = np.mean(img_array)
-                
-                # Apply contrast adjustment
-                contrast_factor = float(contrast_slider.value)
-                adjusted = (img_array - mean) * contrast_factor + mean
-                
-                # Clip values to valid range
-                adjusted = np.clip(adjusted, 0, 255).astype(np.uint8)
-                
-                # Convert back to PIL Image
-                processed_image = PILImage.fromarray(adjusted)
-                show_image(processed_image, f"Contrast adjusted to {contrast_slider.value}")
-            except Exception as e:
-                print(f"Error in contrast adjustment: {str(e)}")
+    def apply_mean(self, _):
+        if self.processed_image:
+            self.processed_image = apply_mean_filter(self.processed_image)
+            self.update_images()
 
-    # Filtering
-    def apply_color_filter(e):
-        nonlocal processed_image
-        if processed_image:
-            if filter_dropdown.value == "Sepia":
-                sepia_filter = ImageOps.colorize(processed_image.convert("L"), "#704214", "#C0A080")
-                processed_image = sepia_filter
-            elif filter_dropdown.value == "Cyanotype":
-                cyan_filter = ImageOps.colorize(processed_image.convert("L"), "#002B5B", "#8CF0E8")
-                processed_image = cyan_filter
-            show_image(processed_image, f"Filter: {filter_dropdown.value}")
+    def apply_sobel(self, _):
+        if self.processed_image:
+            self.processed_image = apply_sobel_filter(self.processed_image)
+            self.update_images()
 
-    # Border
-    def apply_border(e):
-        """Add border with customizable color and thickness."""
-        nonlocal processed_image
-        if processed_image:
-            thickness = int(border_thickness.value)
-            color = border_color.value
-            processed_image = ImageOps.expand(processed_image, border=thickness, fill=color)
-            show_image(processed_image, f"Border: {color}, {thickness}px")
+    def apply_canny(self, _):
+        if self.processed_image:
+            self.processed_image = apply_canny_filter(self.processed_image)
+            self.update_images()
 
-    # # Overlay
-    # def apply_overlay(e):
-    #     """Overlay a secondary image onto the primary image with transparency."""
-    #     nonlocal processed_image
-    #     if processed_image and secondary_image:
-    #         overlay_alpha = overlay_transparency.value
-    #         overlay_resized = secondary_image.resize(processed_image.size)
-    #         processed_image = PILImage.blend(processed_image, overlay_resized, overlay_alpha)
-    #         show_image(processed_image, f"Overlay with alpha {overlay_alpha}")
+    def apply_laplacian(self, _):
+        if self.processed_image:
+            self.processed_image = apply_laplacian_filter(self.processed_image)
+            self.update_images()
 
-    # Definisi fungsi save_image di awal
-    def save_image(e):
-        if processed_image:
-            try:
-                save_file_dialog.save_file(
-                    allowed_extensions=["png", "jpg", "jpeg"],
-                    file_name="processed_image.png"
-                )
-            except Exception as e:
-                print(f"Error saving image: {str(e)}")
-                if image_title:
-                    image_title.value = f"Error saving image: {str(e)}"
-                    image_title.update()
+    def apply_wiener(self, _):
+        if self.processed_image:
+            self.processed_image = apply_wiener_filter(self.processed_image)
+            self.update_images()
 
-    def apply_wiener_filter(e):
-        nonlocal processed_image
-        if processed_image:
-            # Konversi ke array numpy
-            img_array = np.array(processed_image)
-            
-            # Jika gambar berwarna, proses setiap channel
-            if len(img_array.shape) == 3:
-                result = np.zeros_like(img_array)
-                for i in range(3):
-                    result[:,:,i] = scipy.signal.wiener(img_array[:,:,i], (5,5))
-            else:
-                result = scipy.signal.wiener(img_array, (5,5))
-            
-            processed_image = PILImage.fromarray(np.uint8(result))
-            show_image(processed_image, "Wiener Filter Applied")
+    def apply_high_pass(self, _):
+        if self.processed_image:
+            self.processed_image = apply_high_pass_filter(self.processed_image)
+            self.update_images()
 
-    def apply_morphological_operation(e, operation_type):
-        nonlocal processed_image
-        if processed_image:
-            # Convert PIL Image to numpy array
-            img_array = np.array(processed_image)
-            
-            # Apply morphological operation
-            kernel = np.ones((5, 5), np.uint8)
-            if operation_type == "dilation":
-                result = cv2.dilate(img_array, kernel, iterations=1)
-            elif operation_type == "erosion":
-                result = cv2.erode(img_array, kernel, iterations=1)
-            elif operation_type == "opening":
-                result = cv2.morphologyEx(img_array, cv2.MORPH_OPEN, kernel)
-            elif operation_type == "closing":
-                result = cv2.morphologyEx(img_array, cv2.MORPH_CLOSE, kernel)
-            
-            # Convert back to PIL Image
-            processed_image = PILImage.fromarray(result)
-            show_image(processed_image, f"{operation_type.title()} Applied")
+    def apply_low_pass(self, _):
+        if self.processed_image:
+            self.processed_image = apply_low_pass_filter(self.processed_image)
+            self.update_images()
 
-    brightness_slider = Slider(
-        min=0.1,
-        max=3.0,  # Increased range for better visibility
-        value=1.0,
-        label="Brightness",
-        on_change=apply_brightness  # Add direct binding
-    )
-    contrast_slider = Slider(
-        min=0.1,
-        max=3.0,  # Increased range for better visibility
-        value=1.0,
-        label="Contrast",
-        on_change=apply_contrast  # Add direct binding
-    )
+    def apply_border(self, _):
+        if self.processed_image:
+            thickness = int(self.border_thickness.value)
+            color = self.border_color.value
+            self.processed_image = apply_border(self.processed_image, thickness, color)
+            self.update_images()
 
-    # Define enhancement controls
-    enhancement_controls = Column(
-        [
-            Text("Enhancement", size=14, weight="bold", color="#2c3e50"),
-            Row(
-                [
-                    Column([
-                        brightness_slider,
-                        contrast_slider,
-                    ], expand=True),
-                    Column([
-                        ElevatedButton("Apply Brightness", on_click=apply_brightness),
-                        ElevatedButton("Apply Contrast", on_click=apply_contrast),
-                    ])
-                ]
-            ),
-        ]
-    )
+    def apply_morphological(self, operation_type):
+        if self.processed_image:
+            self.processed_image = apply_morphological_operation(self.processed_image, operation_type)
+            self.update_images()
 
-    # Define filtering controls 
-    filtering_controls = Column(
-        [
-            Text("Filtering", size=14, weight="bold", color="#2c3e50"),
-            Row(
-                [
-                    filter_dropdown,
-                    ElevatedButton("Apply Filter", on_click=apply_color_filter),
-                ]
-            ),
-            Row(
-                [
-                    ElevatedButton("Mean Filter", on_click=apply_mean_filter),
-                    ElevatedButton("Gaussian Filter", on_click=apply_gaussian_filter),
-                    ElevatedButton("Median Filter", on_click=apply_median_filter),
+    def reset_image(self, _):
+        if self.uploaded_image:
+            self.processed_image = self.uploaded_image.copy()
+            self.update_images()
+
+    def save_image(self, _):
+        if self.processed_image:
+            self.save_file_dialog.save_file(
+                allowed_extensions=["png", "jpg", "jpeg"],
+                file_name="processed_image.png"
+            )
+    def create_tool_button(self, text, icon, on_click):
+        return ft.Container(
+            content=ft.Row(
+                controls=[
+                    ft.Icon(
+                        name=icon,
+                        size=20,
+                        color=ft.colors.WHITE,
+                    ),
+                    ft.Text(
+                        text,
+                        color=ft.colors.BLACK,
+                        size=14,
+                        weight=ft.FontWeight.W_500,
+                    ),
                 ],
-                wrap=True
+                spacing=8,
+                alignment=ft.MainAxisAlignment.START,
             ),
-            Row(
-                [
-                    ElevatedButton("Sobel Filter", on_click=apply_sobel_filter),
-                    ElevatedButton("Canny Edge", on_click=apply_canny_filter),
-                    ElevatedButton("Laplacian", on_click=apply_laplacian_filter),
-                ],
-                wrap=True
-            ),
-            Row(
-                [
-                    ElevatedButton("Fourier Transform", on_click=apply_fourier_transform),
-                    ElevatedButton("Wiener Filter", on_click=apply_wiener_filter),
-                ],
-                wrap=True
-            ),
-            Row(
-                [
-                    ElevatedButton("Histogram Equalization", on_click=apply_histogram_equalization),
-                    ElevatedButton("Contrast Stretching", on_click=apply_contrast_stretching),
-                ],
-                wrap=True
-            ),
-            # Tambahkan morphological operations
-            Text("Morphological Operations", size=14, weight="bold", color="#2c3e50"),
-            Row(
-                [
-                    ElevatedButton("Dilation", on_click=lambda e: apply_morphological_operation(e, "dilation")),
-                    ElevatedButton("Erosion", on_click=lambda e: apply_morphological_operation(e, "erosion")),
-                    ElevatedButton("Opening", on_click=lambda e: apply_morphological_operation(e, "opening")),
-                    ElevatedButton("Closing", on_click=lambda e: apply_morphological_operation(e, "closing")),
-                ],
-                wrap=True
-            ),
-        ]
-    )
+            padding=ft.padding.all(8),
+            on_click=on_click,
+            ink=True,
+        )
 
-    # Kemudian definisikan UI components
-    red_slider = Slider(min=0, max=255, value=0, label="Red")
-    green_slider = Slider(min=0, max=255, value=0, label="Green")
-    blue_slider = Slider(min=0, max=255, value=0, label="Blue")
-    
-    # Tambahkan definisi brightness dan contrast slider
-    brightness_slider = Slider(
-        min=0.1,
-        max=3.0,  # Increased range for better visibility
-        value=1.0,
-        label="Brightness",
-        on_change=apply_brightness  # Add direct binding
-    )
-    
-    contrast_slider = Slider(
-        min=0.1,
-        max=3.0,  # Increased range for better visibility
-        value=1.0,
-        label="Contrast",
-        on_change=apply_contrast  # Add direct binding
-    )
-    
-    scale_slider = Slider(
-        min=0.1,
-        max=2.0,
-        value=1.0,
-        label="Scale",
-    )
-    
-    # Definisi dropdown dan komponen lainnya
-    maintain_aspect = Checkbox(
-        label="Maintain Aspect Ratio",
-        value=True,
-    )
-    
-    filter_dropdown = Dropdown(
-        width=150,
-        options=[
-            dropdown.Option("Sepia"),
-            dropdown.Option("Cyanotype"),
-        ],
-        value="Sepia"
-    )
-    
-    translation_x = TextField(value="0", label="X", width=100)
-    translation_y = TextField(value="0", label="Y", width=100)
-    rotation_angle = TextField(value="0", label="Angle", width=100)
-    
-    flip_dropdown = Dropdown(
-        width=150,
-        options=[
-            dropdown.Option("Horizontal"),
-            dropdown.Option("Vertical"),
-            dropdown.Option("Diagonal"),
-        ],
-        value="Horizontal"
-    )
-    
-    border_thickness = TextField(value="5", label="Thickness", width=100)
-    border_color = TextField(value="#000000", label="Color", width=100)
+    def reset_input(self):
+        self.uploaded_image = None
+        self.processed_image = None
+        self.output_image.controls[0].content = ft.Container(
+            content=ft.IconButton(
+                icon=ft.icons.ADD_PHOTO_ALTERNATE_ROUNDED,
+                icon_size=50,
+                icon_color=ft.colors.BLUE_200,
+                on_click=lambda _: self.file_picker.pick_files(),
+            ),
+            width=200,
+            height=200,
+            bgcolor=ft.colors.BLUE_50,
+            border_radius=10,
+            alignment=ft.alignment.center,
+        )
+        self.update()
 
-    image_display = Image(width=400, height=600, fit="contain")
-    image_title = Text("No image uploaded", size=16, weight="bold", color="#2c3e50")
+    def build(self):
+        # Back button
+        back_button = ft.IconButton(
+            icon=ft.icons.ARROW_BACK,
+            icon_color=ft.colors.BLUE_400,
+            on_click=self.on_back,
+        )
 
-    # Define basic controls first
-    basic_controls = Column(
-        [
-            Text("Basic Controls", size=14, weight="bold", color="#2c3e50"),
-            Row(
-                [
-                    ElevatedButton("Upload Image", on_click=lambda _: file_picker.pick_files(allow_multiple=False)),
-                    ElevatedButton("Reset Image", on_click=reset_image),
+        # Title and description
+        header = ft.Container(
+            content=ft.Column(
+                controls=[
+                    ft.Text(
+                        "Photos Editor",
+                        size=32,
+                        weight="bold",
+                        color=ft.colors.BLACK87,
+                        text_align=ft.TextAlign.CENTER,
+                    ),
+                    ft.Text(
+                        "Edit and process your photo",
+                        size=16,
+                        color=ft.colors.BLACK54,
+                        text_align=ft.TextAlign.CENTER,
+                    ),
                 ],
-                wrap=True,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                 spacing=10,
             ),
-            Row(
-                [
-                    ElevatedButton("Start Crop", on_click=lambda _: setattr(crop_gesture, "visible", True)),
-                    ElevatedButton(
-                        "Download Image", 
-                        on_click=save_image,
-                        disabled=lambda: processed_image is None
-                    ),
-                ],
-                wrap=True,
-                spacing=10,
-            ),
-        ],
-        spacing=10,
-    )
-
-    # Define control groups
-    transform_controls = Column(
-        [
-            Text("Image Transformations", size=14, weight="bold", color="#2c3e50"),
-            Row(
-                [
-                    ElevatedButton("Grayscale", on_click=apply_grayscale),
-                    ElevatedButton("Negative", on_click=apply_negative),
-                    flip_dropdown,
-                    ElevatedButton("Flip", on_click=apply_flip),
-                ],
-                wrap=True
-            ),
-        ]
-    )
-
-    color_controls = Column(
-        [
-            Text("Color Adjustments", size=14, weight="bold", color="#2c3e50"),
-            Row(
-                [
-                    Column([
-                        red_slider,
-                        green_slider,
-                        blue_slider,
-                    ], expand=True),
-                    ElevatedButton("Apply", on_click=apply_color_manipulation),
-                ]
-            ),
-        ]
-    )
-
-    geometry_controls = Column(
-        [
-            Text("Geometry", size=14, weight="bold", color="#2c3e50"),
-            Row(
-                [
-                    Column([
-                        scale_slider,
-                        maintain_aspect,
-                        Row([translation_x, translation_y]),
-                        rotation_angle,
-                    ], expand=True),
-                    Column([
-                        ElevatedButton("Scale", on_click=apply_scaling),
-                        ElevatedButton("Move", on_click=apply_translation),
-                        ElevatedButton("Rotate", on_click=apply_rotation),
-                    ])
-                ]
-            ),
-        ]
-    )
-
-    # Create crop overlay container
-    crop_overlay = Container(
-        visible=False,
-        border=border.all(2, "white"),
-        bgcolor="#80000000",
-    )
-
-    # Update image container
-    image_container = Container(
-        content=Stack([
-            image_display,
-            crop_overlay,
-        ]),
-        width=400,
-        height=600,
-    )
-
-    # Create gesture detector
-    crop_gesture = GestureDetector(
-        content=image_container,
-        on_pan_start=start_crop,
-        on_pan_update=update_crop,
-        on_pan_end=end_crop,
-        mouse_cursor=MouseCursor.MOVE,
-    )
-
-    # Tambahkan border controls setelah filter_controls
-    border_controls = Column(
-        [
-            Text("Border", size=14, weight="bold", color="#2c3e50"),
-            Row(
-                [
-                    Column([
-                        border_thickness,
-                        border_color,
-                    ], expand=True),
-                    ElevatedButton("Apply Border", on_click=apply_border),
-                ]
-            ),
-        ]
-    )
-
-    # Then create main layout
-    main_content = Container(
-        content=Column(
-            [
-                Container(  # Header container
-                    content=Row(
-                        [
-                            IconButton(
-                                icon=Icons.ARROW_BACK,
-                                icon_color="black",
-                                on_click=lambda e: on_back(e),
-                                tooltip="Back to Home",
-                            ),
-                            image_title,
-                        ],
-                        alignment="center",
-                    ),
-                    padding=10,
-                ),
-                Container(  # Main content container
-                    content=Row(
-                        [
-                            Container(  # Controls container with scroll - left
-                                content=Column(
-                                    [
-                                        basic_controls,
-                                        transform_controls,
-                                        geometry_controls, 
-                                        color_controls,
-                                        enhancement_controls,
-                                        filtering_controls,
-                                        border_controls,
-                                    ],
-                                    spacing=20,
-                                    scroll=ScrollMode.ALWAYS,
-                                    height=600,
-                                ),
-                                width=300,
-                                bgcolor="#1a1a1a",
-                                padding=20,
-                                border_radius=10,
-                                margin=10,
-                            ),
-                            Container(  # Image container - right
-                                content=crop_gesture,
-                                expand=True,
-                                height=600,
-                                margin=10,
-                                alignment=alignment.center,
-                            ),
-                        ],
-                        spacing=0,
-                        alignment="start",
-                    ),
-                    padding=10,
+            padding=ft.padding.all(20),
+        )
+        # Create toolbar sections
+        crop_rotate_tools = ft.ExpansionTile(
+            title=ft.Text("Crop & Rotate"),
+            subtitle=ft.Text("Crop and rotate your image"),
+            controls=[
+                ft.Column(
+                    [
+                        self.create_tool_button("Crop", ft.icons.CROP, lambda _: self.apply_negative),
+                        ft.Row(
+                            [
+                                self.rotation_angle,
+                                self.create_tool_button("Rotate", ft.icons.ROTATE_RIGHT, self.apply_rotation),
+                            ],
+                            spacing=5
+                        )
+                    ],
+                    spacing=10,
                 ),
             ],
+            tile_padding=5,
+        )
+
+        transform_tools = ft.ExpansionTile(
+            title=ft.Text("Transformation"),
+            subtitle=ft.Text("Apply transformations to your image"),
+            controls=[
+                ft.Column(
+                    [
+                        self.create_tool_button("Grayscale", ft.icons.GRADIENT, self.apply_grayscale),
+                        self.create_tool_button("Negative", ft.icons.INVERT_COLORS, self.apply_negative),
+                        ft.Row(
+                            [
+                                self.translate_x,
+                                self.translate_y,
+                                self.create_tool_button("Translate", ft.icons.TRANSLATE, self.apply_translate),
+                            ], 
+                            spacing=5
+                        ),
+                        ft.Row(
+                            [
+                                self.new_width,
+                                self.new_height,
+                                # self.maintain_aspect,
+                                self.create_tool_button("Scale", ft.icons.SCALE, self.apply_scale),
+                            ], 
+                            spacing=5
+                        ),
+                        ft.Row(
+                            [
+                                self.flip_dropdown,
+                                self.create_tool_button("Flip", ft.icons.FLIP, self.apply_flip),
+                            ], 
+                            spacing=5
+                        ),
+                    ],
+                    spacing=5,
+                ),
+            ],
+            tile_padding=5,
+
+        )
+
+        filter_tools = ft.ExpansionTile(
+            title=ft.Text("Filters"),
+            subtitle=ft.Text("Apply color filters"),
+            controls=[
+                ft.Column(
+                    [
+                        self.create_tool_button("Gaussian Filter", ft.icons.FILTER_1, self.apply_gaussian),
+                        self.create_tool_button("Median Filter", ft.icons.FILTER_2, self.apply_median),
+                        self.create_tool_button("Mean Filter", ft.icons.FILTER_3, self.apply_mean),
+                        self.create_tool_button("Sobel Filter", ft.icons.FILTER_4, self.apply_sobel),
+                        self.create_tool_button("Canny Filter", ft.icons.FILTER_5, self.apply_canny),
+                        self.create_tool_button("Laplacian Filter", ft.icons.FILTER_6, self.apply_laplacian),
+                        self.create_tool_button("Wiener Filter", ft.icons.FILTER_7, self.apply_wiener),
+                        self.create_tool_button("Low Pass Filter", ft.icons.FILTER_8, self.apply_low_pass),
+                        self.create_tool_button("High Pass Filter", ft.icons.FILTER_9, self.apply_high_pass),
+                        ft.Row(
+                            [
+                                self.filter_dropdown,
+                                self.create_tool_button("Apply Filter", ft.icons.FILTER, self.apply_color_filtering),
+
+                            ],
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                        ),
+                    ],
+                    spacing=10,
+                ),
+            ],
+            tile_padding=5,
+
+        )
+
+        color_tools = ft.ExpansionTile(
+            title=ft.Text("Color"),
+            subtitle=ft.Text("Adjust color channels"),
+            controls=[
+                ft.Column(
+                    [
+                        self.red_slider,
+                        self.green_slider,
+                        self.blue_slider,
+                        self.create_tool_button("Apply Colors", ft.icons.COLOR_LENS, self.apply_color_manipulation),
+                    ],
+                    spacing=10,
+                ),
+            ],
+            tile_padding=5,
+
+        )
+
+        enhancement_tools = ft.ExpansionTile(
+            title=ft.Text("Enhancement"),
+            subtitle=ft.Text("Adjust brightness and contrast"),
+            controls=[
+                ft.Column(
+                    [
+                        self.create_tool_button("Histogram Equalization", ft.icons.EQUALIZER, self.apply_he),
+                        self.create_tool_button("Contrast Stretching", ft.icons.CONTRAST_ROUNDED, self.apply_cs),
+                        ft.Row([
+                            self.gamma,
+                            self.create_tool_button("Gamma Correction", None, self.apply_gc),
+                        ], spacing=5),
+                        ft.Row([
+                            self.brightness_slider,
+                            self.create_tool_button("Brightness", ft.icons.BRIGHTNESS_6, self.apply_brightness),
+                        ], spacing=5),
+                        ft.Row([
+                            self.contrast_slider,
+                            self.create_tool_button("Contrast", ft.icons.CONTRAST, self.apply_contrast),
+                        ], spacing=5),
+                    ],
+                    spacing=10,
+                ),
+            ],
+            tile_padding=5,
+
+        )
+
+        morphological_tools = ft.ExpansionTile(
+            title=ft.Text("Morphological"),
+            subtitle=ft.Text("Apply morphological operations"),
+            controls=[
+                ft.Column(
+                    [
+                        self.create_tool_button("Dilation", ft.icons.ADD, lambda _: self.apply_morphological("dilation")),
+                        self.create_tool_button("Erosion", ft.icons.REMOVE, lambda _: self.apply_morphological("erosion")),
+                        self.create_tool_button("Opening", ft.icons.OPEN_IN_NEW, lambda _: self.apply_morphological("opening")),
+                        self.create_tool_button("Closing", ft.icons.CLOSE, lambda _: self.apply_morphological("closing")),
+                    ],
+                    spacing=10,
+                ),
+            ],
+            tile_padding=5,
+        )
+
+        border_tools = ft.ExpansionTile(
+            title=ft.Text("Border"),
+            subtitle=ft.Text("Add border to your image"),
+            controls=[
+                ft.Column(
+                    [
+                        self.border_thickness,
+                        self.border_color,
+                        self.create_tool_button("Apply Border", ft.icons.BORDER_STYLE, self.apply_border),
+                    ],
+                    spacing=10,
+                ),
+            ],
+            tile_padding=5,
+        )
+
+        # Create toolbar with ExpansionTiles
+        toolbar = ft.Column(
+            controls=[
+                crop_rotate_tools,
+                transform_tools,
+                filter_tools,
+                color_tools,
+                enhancement_tools,
+                morphological_tools,
+                border_tools,
+            ],
             spacing=0,
-            horizontal_alignment="center",
-        ),
-        expand=True,
-    )
+            expand=True,
+        )
+
+        self.output_image = ft.Stack(
+            controls=[
+                ft.Container(
+                    content=ft.Container(
+                        content=ft.IconButton(
+                            icon=ft.icons.ADD_PHOTO_ALTERNATE_ROUNDED,
+                            icon_size=50,
+                            icon_color=ft.colors.BLUE_200,
+                            on_click=lambda _: self.file_picker.pick_files(),
+                        ),
+                        width=200,
+                        height=200,
+                        bgcolor=ft.colors.BLUE_50,
+                        border_radius=10,
+                        alignment=ft.alignment.center,
+                    ),
+                    width=600,
+                    height=600,
+                    bgcolor=ft.colors.GREY_50,
+                    border_radius=10,
+                    alignment=ft.alignment.center,
+                ),
+            ],
+        )
     
-    return main_content
+        image_area = ft.Row(
+            [
+                ft.Container(
+                    content=ft.Column(
+                        [
+                            self.output_image,
+                            ft.Container(
+                                content=ft.Row(
+                                    controls=[
+                                        ft.ElevatedButton(
+                                            text="Download",
+                                            icon=ft.icons.DOWNLOAD,
+                                            on_click=self.save_image,
+                                        ),
+                                        ft.ElevatedButton(
+                                            text="Reset",
+                                            icon=ft.icons.REFRESH,
+                                            on_click=self.reset_image,
+                                        ),
+                                    ],
+                                    alignment=ft.MainAxisAlignment.CENTER,
+                                    spacing=20,
+                                ),
+                                padding=ft.padding.symmetric(vertical=10),
+                            ),
+                        ],
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=10,
+                    ),
+                    padding=20,
+                    expand=True,
+                ),
+            ],
+            expand=True,
+        )
+
+        # Create main layout
+        return ft.Container(
+            content=ft.Column(
+                [
+                    ft.Row([back_button], alignment=ft.MainAxisAlignment.START),
+                    header,
+                    ft.Row(
+                        [
+   
+                            ft.Container(
+                                content=toolbar,
+                                expand=1,
+                                padding=10,
+                            ),
+                            ft.VerticalDivider(width=1),
+                            ft.Container(
+                                content=image_area,
+                                expand=2,
+                            ),
+                        ],
+                        expand=True,
+                    ),
+                ],
+                spacing=20,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                alignment=ft.MainAxisAlignment.CENTER,
+                expand=True,
+            ),
+            padding=ft.padding.all(20),
+            alignment=ft.alignment.center,
+            expand=True,
+        )
+

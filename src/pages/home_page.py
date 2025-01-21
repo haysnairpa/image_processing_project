@@ -16,7 +16,7 @@ from flet import (
     transform,
     Stack,
 )
-from .basic_ops import basic_operations_page
+from .basic_ops import PhotoEditorPage
 from .photo_stitch_page import PhotoStitchPage
 from .background_removal_page import BackgroundRemovalPage
 from .photo_compression_page import PhotoCompressionPage
@@ -66,9 +66,9 @@ class HomePage(UserControl):
     
     def navigate_to_photos_editor(self, e):
         self.page.clean()
-        page = basic_operations_page(
+        page = PhotoEditorPage(
             self.page,
-            lambda e: self.show_home()
+            lambda _: self.show_home()
         )
         self.page.add(page)
     
