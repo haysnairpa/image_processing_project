@@ -15,7 +15,7 @@ def blend_images(img1_path, img2_path, alpha, beta, gamma):
     
     return blended_img
 
-def overlay_images(background_path, overlay_path, alpha):
+def overlay_images(background_path, overlay_path, alpha, x, y):
     background = cv2.imread(background_path)
     overlay = cv2.imread(overlay_path)
 
@@ -24,10 +24,7 @@ def overlay_images(background_path, overlay_path, alpha):
     
     # Split overlay into color channels and alpha channel
     overlay_b, overlay_g, overlay_r = cv2.split(overlay)
-
-    x = 50
-    y = 50
-
+    
     # Ensure the ROI stays within background dimensions
     h, w = overlay.shape[:2]
     roi_h = min(h, background.shape[0] - y)

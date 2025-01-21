@@ -16,14 +16,12 @@ def apply_color_manipulation(image, r_factor, g_factor, b_factor):
     r = np.clip(r * r_factor, 0, 255)
     g = np.clip(g * g_factor, 0, 255)
     b = np.clip(b * b_factor, 0, 255)
+    
     adjusted_img = np.stack((r, g, b), axis=-1).astype(np.uint8)
     return PILImage.fromarray(adjusted_img)
 
-def apply_scaling(image, new_width, new_height, maintain_aspect=True):    
-    if maintain_aspect:
-        result = image.thumbnail((new_width, new_height), PILImage.LANCZOS)  # Maintain aspect ratio
-    else:
-        result = image.resize((new_width, new_height), PILImage.LANCZOS)  # Ignore aspect ratio
+def apply_scaling(image, new_width, new_height):    
+    result = image.resize((new_width, new_height), PILImage.LANCZOS)  # Ignore aspect ratio
     
     return result
 
@@ -36,7 +34,7 @@ def apply_translation(image, dx, dy):
     translated_image = PILImage.new(image.mode, (new_width, new_height))
     
     # Calculate the paste position
-    paste_x = max(0, dx)
+    paste_x = max(0, dx) 
     paste_y = max(0, dy)
     
     # Paste the original image onto the new canvas
@@ -49,7 +47,7 @@ def apply_crop_image(image, start_row, start_col, num_rows, num_cols):
         out = image[start_row:start_row + num_rows, start_col:start_col + num_cols, :]
     elif len(image.shape) == 2: # for grayscale image
         out = image[start_row:start_row + num_rows, start_col:start_col + num_cols]
-    return PILImage.fromarray(out).astype(np.uint8)
+    return PILImage.fromarray(np.uint8(out))
 
 def apply_flip(image, flip_type):
     if flip_type == "Horizontal":

@@ -43,6 +43,10 @@ class PhotoEditorPage(ft.UserControl):
         )
         
         # Initialize text fields
+        self.crop_start_x = ft.TextField(value="0", label="Start X", width=70)
+        self.crop_start_y = ft.TextField(value="0", label="Start Y", width=70)
+        self.crop_width = ft.TextField(value="100", label="Width", width=70)
+        self.crop_height = ft.TextField(value="100", label="Height", width=70)
         self.rotation_angle = ft.TextField(value="0", label="Angle", width=300)
         self.gamma = ft.TextField(value="1", label="Gamma", width=300)
         self.new_width = ft.TextField(value="0", label="New Width", width=145)
@@ -83,6 +87,8 @@ class PhotoEditorPage(ft.UserControl):
                         icon_color=ft.colors.WHITE,
                         bgcolor=ft.colors.BLACK54,
                         on_click=lambda _: self.reset_input(),
+                        top=0,
+                        right=0
                     ),
                 ],
         )
@@ -123,6 +129,16 @@ class PhotoEditorPage(ft.UserControl):
             g = int(self.green_slider.value)
             b = int(self.blue_slider.value)
             self.processed_image = apply_color_manipulation(self.processed_image, r, g, b)
+            self.update_images()
+
+    def apply_crop(self, _):
+        if self.processed_image:
+            start_x = int(self.crop_start_x.value)
+            start_y = int(self.crop_start_y.value)
+            width = int(self.crop_width.value)
+            height = int(self.crop_height.value)
+            
+            self.processed_image = apply_crop_image(self.processed_image, start_y, start_x, height, width)
             self.update_images()
 
     def apply_flip(self, _):
@@ -254,7 +270,7 @@ class PhotoEditorPage(ft.UserControl):
                     ft.Icon(
                         name=icon,
                         size=20,
-                        color=ft.colors.WHITE,
+                        color=ft.colors.BLACK,
                     ),
                     ft.Text(
                         text,
@@ -327,7 +343,16 @@ class PhotoEditorPage(ft.UserControl):
             controls=[
                 ft.Column(
                     [
-                        self.create_tool_button("Crop", ft.icons.CROP, lambda _: self.apply_negative),
+                        ft.Row(
+                            [
+                                self.crop_start_x,
+                                self.crop_start_y,
+                                self.crop_width,
+                                self.crop_height,
+                                self.create_tool_button("Crop", ft.icons.CROP, self.apply_crop),
+                            ],
+                            spacing=5
+                        ),
                         ft.Row(
                             [
                                 self.rotation_angle,

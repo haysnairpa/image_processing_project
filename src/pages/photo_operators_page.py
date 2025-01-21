@@ -47,6 +47,8 @@ class PhotoOperatorsPage(UserControl):
         self.background_label = None
         self.overlay_label = None
         self.overlay_alpha = None
+        self.overlay_x = None
+        self.overlay_y = None
 
     def add_image(self, index):
         def on_result(e: ft.FilePickerResultEvent):
@@ -123,12 +125,16 @@ class PhotoOperatorsPage(UserControl):
             self.background_label.visible = False
             self.overlay_label.visible = False
             self.overlay_alpha.visible = False
+            self.overlay_x.visible = False
+            self.overlay_y.visible = False
 
         elif e.data == "Overlay":
             self.background_label.visible = True
             self.overlay_label.visible = True
             self.blend_params_container.visible = False
             self.overlay_alpha.visible = True
+            self.overlay_x.visible = True
+            self.overlay_y.visible = True
 
         else:
             self.blend_params_container.visible = False
@@ -136,6 +142,8 @@ class PhotoOperatorsPage(UserControl):
             self.background_label.visible = False
             self.overlay_label.visible = False
             self.overlay_alpha.visible = False
+            self.overlay_x.visible = False
+            self.overlay_y.visible = False
         self.update()
 
     def apply_operator(self, e):
@@ -166,7 +174,7 @@ class PhotoOperatorsPage(UserControl):
                 gamma = float(self.gamma_input.value)
                 result_array = blend_images(img1, img2, alpha, beta, gamma)
             elif operator == "Overlay":
-                result_array = overlay_images(img1, img2, self.overlay_alpha.value)
+                result_array = overlay_images(img1, img2, self.overlay_alpha.value, int(self.overlay_x.value), int(self.overlay_y.value))
             else:
                 return
 
@@ -353,6 +361,9 @@ class PhotoOperatorsPage(UserControl):
             visible=False
         )
 
+        self.overlay_x = ft.TextField(value="0", label="X", visible=False)
+        self.overlay_y = ft.TextField(value="0", label="Y", visible=False)
+
         # Apply operator button
         apply_button = ElevatedButton(
             text="Apply Operation",
@@ -410,6 +421,8 @@ class PhotoOperatorsPage(UserControl):
                 ),
                 self.blend_params_container,
                 self.overlay_alpha,
+                self.overlay_x,
+                self.overlay_y,
                 apply_button,
             ],
             spacing=20,
