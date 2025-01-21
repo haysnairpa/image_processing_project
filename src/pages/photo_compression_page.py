@@ -59,26 +59,26 @@ class PhotoCompressionPage(UserControl):
     def compress_image(self, e):
         if self.selected_image:
             # Open the image and convert it to a numpy array
-            img = PILImage.open(self.selected_image.src)
+            img = PILImage.open(self.selected_image.src).convert("RGB")
             img_array = np.array(img)
 
             # Compress the image based on the selected method
             if self.selected_method == "RLE":
-                compressed_array = compress_image_rle(img_array)
+                compressed_array = compress_image_rle(img_array)  # Call RLE compression function
             else:  # DCT
-                compressed_array = compress_image_dct(img_array)
+                compressed_array = compress_image_dct(img_array)  # Call DCT compression function
 
             # Convert the compressed array back to an image
             compressed_img = PILImage.fromarray(compressed_array.astype('uint8'))
 
-            # Save the image to an in-memory buffer
+            # Save the compressed image in a high-compression format (JPEG with quality 85)
             self.result_image = io.BytesIO()
-            compressed_img.save(self.result_image, format="PNG")
+            compressed_img.save(self.result_image, format="JPEG", quality=85)
             self.result_image.seek(0)
-            
-            # Update the result image
+
+            # Update the UI with the result image
             result = Image(
-                src_base64= base64.b64encode(self.result_image.getvalue()).decode("utf-8"),
+                src_base64=base64.b64encode(self.result_image.getvalue()).decode("utf-8"),
                 width=300,
                 height=300,
                 fit=ft.ImageFit.CONTAIN,
